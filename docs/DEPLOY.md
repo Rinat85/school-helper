@@ -12,7 +12,7 @@
 ## 1. Подготовка сервера (один раз)
 
 ```bash
-apt update && apt install -y git curl sqlite3      # docker уже стоит
+sudo apt update && sudo apt install -y git curl sqlite3      # docker уже стоит
 ```
 
 `sqlite3` нужен для снимков базы перед выкаткой — без него деплой пройдёт,
@@ -20,20 +20,33 @@ apt update && apt install -y git curl sqlite3      # docker уже стоит
 
 ### Пользователь для деплоя
 
-Работать из-под root можно, но лучше отдельный пользователь в группе `docker`:
+Отдельный пользователь не обязателен: если на сервере уже есть непривилегированный
+`ubuntu` (обычный случай на AWS), деплоить можно под ним — тогда в секретах
+`DEPLOY_USER=ubuntu`. Главное, чтобы он состоял в группе `docker`:
 
 ```bash
-adduser --disabled-password --gecos "" deploy
-usermod -aG docker deploy
+docker ps                          # "permission denied" -> строка ниже и перезайти по ssh
+sudo usermod -aG docker ubuntu
 ```
+
+Если такого пользователя нет, завести отдельного:
+
+```bash
+sudo adduser --disabled-password --gecos "" deploy
+sudo usermod -aG docker deploy
+```
+
+Из-под root деплоить тоже можно, но не нужно: приватный ключ лежит в GitHub,
+и компрометация секретов не должна сразу давать root на сервере.
 
 ### Клонирование
 
-Репозиторий публичный, поэтому ключи для `git fetch` не нужны — хватит HTTPS:
+Репозиторий публичный, поэтому ключи для `git fetch` не нужны — хватит HTTPS.
+Владельцем каталога делается тот пользователь, под которым пойдёт деплой:
 
 ```bash
-mkdir -p /opt/school-helper && chown deploy:deploy /opt/school-helper
-su - deploy
+sudo mkdir -p /opt/school-helper
+sudo chown "$USER:$USER" /opt/school-helper
 git clone https://github.com/Rinat85/school-helper.git /opt/school-helper
 cd /opt/school-helper
 ```
@@ -76,7 +89,7 @@ ssh-keygen -t ed25519 -f ~/.ssh/school-helper-deploy -N "" -C "github-actions"
 Публичную часть — на сервер:
 
 ```bash
-ssh-copy-id -i ~/.ssh/school-helper-deploy.pub deploy@ВАШ_СЕРВЕР
+ssh-copy-id -i ~/.ssh/school-helper-deploy.pub ubuntu@ВАШ_СЕРВЕР   # или deploy@
 ```
 
 Отпечаток сервера для `known_hosts` (чтобы Actions не принимал хост вслепую):
@@ -95,7 +108,7 @@ ssh-keyscan -p 22 ВАШ_СЕРВЕР
 |---|---|
 | `DEPLOY_SSH_KEY` | содержимое `~/.ssh/school-helper-deploy` (приватный ключ, целиком) |
 | `DEPLOY_HOST` | IP или домен сервера |
-| `DEPLOY_USER` | `deploy` |
+| `DEPLOY_USER` | пользователь для деплоя: `ubuntu` или `deploy` |
 | `DEPLOY_KNOWN_HOSTS` | вывод `ssh-keyscan` |
 | `DEPLOY_PORT` | порт SSH, если не 22 (иначе не создавать) |
 | `DEPLOY_PATH` | путь, если не `/opt/school-helper` (иначе не создавать) |
