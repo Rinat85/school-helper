@@ -1,0 +1,6 @@
+# Скрипты и конфиги, которые исполняются на Linux, должны хранить LF:
+# при CRLF bash на сервере падает с "\r: command not found".
+*.sh        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+Dockerfile  text eol=lf
