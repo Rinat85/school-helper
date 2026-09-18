@@ -1,10 +1,8 @@
+# Прод: готовый образ из GHCR, собранный в GitHub Actions.
+# Локальная сборка — docker-compose.dev.yml (на VPS не собираем, там мало памяти).
 services:
   school-helper:
-    build:
-      context: .
-      args:
-        GIT_SHA: ${GIT_SHA:-dev}
-    image: school-helper:latest
+    image: ghcr.io/rinat85/school-helper:${IMAGE_TAG:-latest}
     container_name: school-helper
     restart: unless-stopped
     env_file: .env
@@ -18,6 +16,9 @@ services:
     ports:
       # Наружу не торчит: снаружи только Caddy, и только когда появится домен.
       - "127.0.0.1:8080:8080"
+    # Сосед по машине не должен уметь утащить всю память: на этом VPS
+    # 1.9 ГБ на всё, и одна протечка кладёт остальные сервисы в своп.
+    mem_limit: 256m
     healthcheck:
       # curl в slim-образе нет, проверяем питоном.
       test: ["CMD", "python", "-c",

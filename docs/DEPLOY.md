@@ -1,11 +1,18 @@
 # Деплой на VPS
 
-Схема: push в `main` → GitHub Actions гоняет `ruff` и `pytest` → если зелено, заходит
-по SSH на сервер и запускает [`deploy/deploy.sh`](../deploy/deploy.sh), который делает
-снимок базы, переключается на нужный коммит, пересобирает контейнер и проверяет
-`/health`. Если health не поднялся — автоматический откат на предыдущий коммит.
+```
+push в main
+   └─ Actions: ruff + pytest
+        └─ Actions: docker build -> ghcr.io/rinat85/school-helper:<sha>
+             └─ ssh на VPS: deploy.sh -> снимок базы -> docker compose pull -> up -d
+                  └─ проверка /health -> при неудаче откат на предыдущий образ
+```
 
-Сломанный коммит до сервера не доезжает: job `deploy` зависит от job `test`.
+Сломанный коммит до сервера не доезжает: `build` зависит от `test`, `deploy` — от `build`.
+
+**Образ собирается в GitHub Actions, а не на сервере.** На этом VPS 1.9 ГБ памяти
+на все проекты, и локальная сборка вытесняла бы работающие сервисы в своп.
+Сервер только забирает готовый образ — это секунды и почти нулевая нагрузка.
 
 ---
 
@@ -17,6 +24,17 @@ sudo apt update && sudo apt install -y git curl sqlite3      # docker уже с�
 
 `sqlite3` нужен для снимков базы перед выкаткой — без него деплой пройдёт,
 но напишет предупреждение и снимок не сделает.
+
+**Проверь архитектуру:**
+
+```bash
+uname -m
+```
+
+`x86_64` — всё готово. Если `aarch64` (Graviton), в
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) в шаге сборки нужно
+добавить `--platform linux/arm64` и включить QEMU — сейчас образ собирается
+только под amd64, и на ARM он просто не запустится.
 
 ### Пользователь для деплоя
 
@@ -41,8 +59,8 @@ sudo usermod -aG docker deploy
 
 ### Клонирование
 
-Репозиторий публичный, поэтому ключи для `git fetch` не нужны — хватит HTTPS.
-Владельцем каталога делается тот пользователь, под которым пойдёт деплой:
+На сервере нужен сам репозиторий — не ради кода (он внутри образа), а ради
+`docker-compose.yml` и `deploy/deploy.sh`. Репозиторий публичный, ключи не нужны:
 
 ```bash
 sudo mkdir -p /opt/school-helper
@@ -64,16 +82,6 @@ nano .env        # BOT_TOKEN, BOT_USERNAME, APP_SECRET, BOOTSTRAP_CHAIR_TG_ID
 > **Не редактируй файлы проекта на сервере.** Деплой делает `git reset --hard` и
 > сотрёт правки без предупреждения. Всё меняется через репозиторий, кроме `.env`.
 
-### Первый запуск руками
-
-```bash
-GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
-curl -s localhost:8080/health
-```
-
-Ожидаемо: `{"ok":true,"mode":"polling",...}`. Режим `polling` — это нормально,
-пока нет домена: бот работает опросом, HTTP-сервер поднят только ради `/health`.
-
 ---
 
 ## 2. Ключ для GitHub Actions
@@ -84,18 +92,8 @@ curl -s localhost:8080/health
 
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/school-helper-deploy -N "" -C "github-actions"
-```
-
-Публичную часть — на сервер:
-
-```bash
 ssh-copy-id -i ~/.ssh/school-helper-deploy.pub ubuntu@ВАШ_СЕРВЕР   # или deploy@
-```
-
-Отпечаток сервера для `known_hosts` (чтобы Actions не принимал хост вслепую):
-
-```bash
-ssh-keyscan -p 22 ВАШ_СЕРВЕР
+ssh-keyscan -p 22 ВАШ_СЕРВЕР                                      # для known_hosts
 ```
 
 ---
@@ -113,29 +111,56 @@ ssh-keyscan -p 22 ВАШ_СЕРВЕР
 | `DEPLOY_PORT` | порт SSH, если не 22 (иначе не создавать) |
 | `DEPLOY_PATH` | путь, если не `/opt/school-helper` (иначе не создавать) |
 
+Токен для GHCR заводить не нужно: сборка публикует образ встроенным
+`GITHUB_TOKEN`, права выданы в самом workflow (`packages: write`).
+
 Workflow использует environment `production` — если завести его в
 `Settings → Environments` и включить required reviewers, каждая выкатка будет
 ждать твоего подтверждения. Полезно, когда пойдут реальные деньги.
 
 ---
 
-## 4. Как выкатывать
+## 4. Образ в GHCR (один раз после первой сборки)
 
-- **обычно** — просто `git push`: тесты и деплой пройдут сами;
-- **вручную** — вкладка Actions → «CI и деплой» → Run workflow;
-- **с сервера**, если GitHub недоступен:
+После первого прогона workflow пакет появится в
+`github.com/Rinat85?tab=packages`. По умолчанию он **приватный**, и сервер не
+сможет его забрать без авторизации. Проще всего сделать его публичным:
+
+`Package → Package settings → Change visibility → Public`
+
+Секретов в образе нет: код и так в публичном репозитории, а `.env` подключается
+на сервере томом и внутрь образа не попадает.
+
+Если держать пакет приватным принципиально — на сервере понадобится вход
+с personal access token (scope `read:packages`):
 
 ```bash
-cd /opt/school-helper && DEPLOY_SHA=origin/main bash deploy/deploy.sh
+echo ВАШ_PAT | docker login ghcr.io -u Rinat85 --password-stdin
+```
+
+Логин сохранится в `~/.docker/config.json`, и `docker compose pull` заработает.
+
+---
+
+## 5. Как выкатывать
+
+- **обычно** — просто `git push`: тесты, сборка и деплой пройдут сами;
+- **вручную** — вкладка Actions → «CI и деплой» → Run workflow;
+- **с сервера**, если GitHub Actions недоступен:
+
+```bash
+cd /opt/school-helper && IMAGE_TAG=latest DEPLOY_SHA=origin/main bash deploy/deploy.sh
 ```
 
 ### Откат
 
-Автоматический откат срабатывает сам, если `/health` не поднялся. Руками:
+Автоматический откат срабатывает сам, если `/health` не поднялся: скрипт помнит
+предыдущий тег в `data/.deployed_tag` и возвращает его. Руками — любым сохранённым
+хешем коммита, теги образов совпадают с ними:
 
 ```bash
 cd /opt/school-helper
-DEPLOY_SHA=<хеш коммита> bash deploy/deploy.sh
+IMAGE_TAG=<полный хеш коммита> DEPLOY_SHA=<он же> bash deploy/deploy.sh
 ```
 
 ### Посмотреть, что крутится
@@ -143,11 +168,12 @@ DEPLOY_SHA=<хеш коммита> bash deploy/deploy.sh
 ```bash
 curl -s localhost:8080/health          # revision = короткий хеш коммита
 docker compose logs -f --tail 100
+docker stats --no-stream school-helper
 ```
 
 ---
 
-## 5. Домен и Mini App (этап 2)
+## 6. Домен и Mini App (этап 2)
 
 Пока бот работает опросом, домен не нужен. Он понадобится для Mini App:
 Telegram открывает Web App только по HTTPS.
@@ -176,7 +202,22 @@ WEBHOOK_SECRET=<python -c "import secrets;print(secrets.token_urlsafe(32))">
 
 ---
 
-## 6. База
+## 7. Ресурсы
+
+Контейнеру выставлен `mem_limit: 256m`. Это не оптимизация, а страховка соседей:
+на машине 1.9 ГБ на все проекты, и одна протечка памяти кладёт остальные сервисы
+в своп. Если бот упрётся в лимит, его прибьёт и перезапустит — но Spreadis и
+торговый бот при этом не пострадают.
+
+Проверить, сколько он реально ест:
+
+```bash
+docker stats --no-stream school-helper
+```
+
+---
+
+## 8. База
 
 Снимок делается автоматически перед каждой выкаткой в `data/backups/`,
 хранятся последние 20. Этого достаточно для откатов, но **это не резервное

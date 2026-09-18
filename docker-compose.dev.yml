@@ -1,0 +1,10 @@
+# Локальная сборка образа — для проверки Dockerfile на своей машине.
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+# На VPS так делать не нужно: там образ забирается готовым из GHCR.
+services:
+  school-helper:
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+    image: school-helper:local

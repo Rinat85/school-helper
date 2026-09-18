@@ -32,10 +32,36 @@ jobs:
       - name: Тесты
         run: pytest -q
 
+  build:
+    name: Сборка образа
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write          # право писать в GHCR
+    steps:
+      - uses: actions/checkout@v4
+
+      # Образ собирается здесь, а не на VPS: там 1.9 ГБ памяти на семь
+      # контейнеров, и сборка вытесняла бы в своп работающие сервисы.
+      - name: Сборка и публикация в GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"      # GHCR требует нижний регистр
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker build \
+            --build-arg "GIT_SHA=${GITHUB_SHA::7}" \
+            -t "$IMAGE:$GITHUB_SHA" \
+            -t "$IMAGE:latest" \
+            .
+          docker push --all-tags "$IMAGE"
+          echo "Собран \`$IMAGE:${GITHUB_SHA::7}\`" >> "$GITHUB_STEP_SUMMARY"
+
   deploy:
     name: Выкатка на VPS
-    needs: test                              # сломанный коммит до сервера не доедет
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -65,14 +91,15 @@ jobs:
           # которая лежит в выкатываемом коммите.
           ssh -i ~/.ssh/id_deploy -p "$PORT" -o BatchMode=yes \
               "$USER@$HOST" \
-              "APP_DIR='$APP_DIR' DEPLOY_SHA='$SHA' bash -s" < deploy/deploy.sh
+              "APP_DIR='$APP_DIR' DEPLOY_SHA='$SHA' IMAGE_TAG='$SHA' bash -s" \
+              < deploy/deploy.sh
 
       - name: Итог
         if: always()
         run: |
           if [ "${{ job.status }}" = "success" ]; then
-            echo "Выкатан ${GITHUB_SHA:0:7}" >> "$GITHUB_STEP_SUMMARY"
+            echo "Выкатан \`${GITHUB_SHA::7}\`" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "Деплой не удался, на сервере откат на предыдущий коммит." \
+            echo "Деплой не удался, на сервере откат на предыдущий образ." \
               >> "$GITHUB_STEP_SUMMARY"
           fi
