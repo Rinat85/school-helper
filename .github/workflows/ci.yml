@@ -1,0 +1,78 @@
+name: CI и деплой
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:        # кнопка «Run workflow» — выкатить вручную
+
+concurrency:
+  # Два деплоя одновременно на один сервер — гарантированная каша.
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Тесты
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Установка
+        run: pip install -e ".[dev]"
+
+      - name: Линтер
+        run: ruff check src tests
+
+      - name: Тесты
+        run: pytest -q
+
+  deploy:
+    name: Выкатка на VPS
+    needs: test                              # сломанный коммит до сервера не доедет
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ключ и known_hosts
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Хост сверяем по заранее сохранённому отпечатку, а не принимаем вслепую.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Деплой
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          APP_DIR: ${{ secrets.DEPLOY_PATH || '/opt/school-helper' }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Скрипт подаётся на stdin: на сервере выполняется ровно та версия,
+          # которая лежит в выкатываемом коммите.
+          ssh -i ~/.ssh/id_deploy -p "$PORT" -o BatchMode=yes \
+              "$USER@$HOST" \
+              "APP_DIR='$APP_DIR' DEPLOY_SHA='$SHA' bash -s" < deploy/deploy.sh
+
+      - name: Итог
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "Выкатан ${GITHUB_SHA:0:7}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Деплой не удался, на сервере откат на предыдущий коммит." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi

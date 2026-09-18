@@ -37,6 +37,8 @@ PUBLIC_URL = _str("PUBLIC_URL").rstrip("/")  # https://class.example.com
 DB_PATH = Path(_str("DB_PATH", str(ROOT / "data" / "school.db")))
 LOG_DIR = Path(_str("LOG_DIR", str(ROOT / "data" / "logs")))
 LOG_LEVEL = _str("LOG_LEVEL", "INFO")
+# Коммит, из которого собран образ. Проставляется при сборке, виден в /health.
+GIT_SHA = _str("GIT_SHA")
 HOST = _str("HOST", "0.0.0.0")
 PORT = _int("PORT", 8080)
 

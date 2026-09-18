@@ -1,12 +1,35 @@
 services:
   school-helper:
-    build: .
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+    image: school-helper:latest
+    container_name: school-helper
     restart: unless-stopped
     env_file: .env
     environment:
       DB_PATH: /app/data/school.db
       LOG_DIR: /app/data/logs
     volumes:
+      # База и логи переживают пересборку образа — это единственное,
+      # что нельзя потерять при деплое.
       - ./data:/app/data
     ports:
+      # Наружу не торчит: снаружи только Caddy, и только когда появится домен.
       - "127.0.0.1:8080:8080"
+    healthcheck:
+      # curl в slim-образе нет, проверяем питоном.
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys,json;\
+              d=json.load(urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=5));\
+              sys.exit(0 if d.get('ok') else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
