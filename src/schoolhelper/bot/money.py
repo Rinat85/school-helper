@@ -19,9 +19,8 @@ from ..core import logger, util
 from ..core import roles as roles_mod
 from ..services import collections as coll_svc
 from ..services import payments as pay_svc
-from ..storage import db, files, money, persons
-from ..storage import klass as klass_repo
-from . import notify, texts
+from ..storage import files, money, persons
+from . import publisher, texts
 from .middleware import deny
 
 log = logger.get(__name__)
@@ -174,43 +173,11 @@ async def collection_publish(
     collection = coll_svc.get(collection_id)
     assert collection is not None
 
-    klass_row = klass_repo.get(class_id)
-    card = (klass_row["card_number"], klass_row["card_holder"]) if klass_row else (None, None)
-
-    # 1. В группу — объявление и прогресс без имён.
-    if klass_row and klass_row["tg_chat_id"]:
-        sent = await bot.send_message(
-            klass_row["tg_chat_id"],
-            coll_svc.public_announcement(collection, card),
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text="💵 Я оплатил", callback_data=f"pay:{collection_id}"
-                        )
-                    ]
-                ]
-            ),
-        )
-        db.execute(
-            "UPDATE collection SET tg_message_id = ? WHERE id = ?", sent.message_id, collection_id
-        )
-        try:
-            await bot.pin_chat_message(klass_row["tg_chat_id"], sent.message_id)
-        except Exception:  # noqa: BLE001 - нет прав на закрепление, не повод падать
-            log.warning("cannot pin message in chat %s", klass_row["tg_chat_id"])
-
-    # 2. Каждому лично — только его взнос.
-    queued = notify.enqueue_many(
-        persons.active(class_id),
-        "collection.new",
-        coll_svc.private_reminder(collection),
-        buttons=[[{"text": "💵 Я оплатил", "callback_data": f"pay:{collection_id}"}]],
-    )
+    result = await publisher.announce_collection(bot, collection_id)
 
     await callback.message.edit_text(
         f"✅ Сбор объявлен. Код для переводов: <code>{collection['payment_code']}</code>\n"
-        f"Личных сообщений в очереди: {queued}"
+        f"Личных сообщений в очереди: {result['queued']}"
     )
     await callback.answer()
 
@@ -309,47 +276,7 @@ async def pay_receipt(
         receipt_file_id=receipt_id,
     )
     await message.answer("Спасибо! Передал казначею — он подтвердит.")
-    await _notify_treasurers(bot, class_id, payment_id, person, amount, method, receipt_id)
-
-
-async def _notify_treasurers(
-    bot: Bot,
-    class_id: int,
-    payment_id: int,
-    payer: sqlite3.Row,
-    amount: int,
-    method: str,
-    receipt_id: int | None,
-) -> None:
-    collection = pay_svc.collection_of(payment_id)
-    title = collection["title"] if collection else ""
-    how = "наличными" if method == "cash" else "переводом"
-    caption = (
-        f"🧾 <b>{persons.label(payer)}</b> заявил оплату\n"
-        f"{util.money(amount, currency=True)} {how} · {title}"
-    )
-    markup = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"pconf:{payment_id}"),
-                InlineKeyboardButton(text="❌ Не вижу", callback_data=f"prej:{payment_id}"),
-            ]
-        ]
-    )
-
-    tg_file = files.tg_id(receipt_id)
-    for treasurer in persons.with_role(class_id, roles_mod.TREASURER):
-        if not treasurer["dm_open"]:
-            continue
-        try:
-            if tg_file:
-                await bot.send_photo(
-                    treasurer["tg_user_id"], tg_file, caption=caption, reply_markup=markup
-                )
-            else:
-                await bot.send_message(treasurer["tg_user_id"], caption, reply_markup=markup)
-        except Exception:  # noqa: BLE001
-            log.warning("cannot notify treasurer %s", treasurer["id"])
+    await publisher.notify_treasurers(bot, payment_id)
 
 
 # ── Казначей подтверждает ───────────────────────────────────────────────
@@ -371,20 +298,10 @@ async def payment_confirm(
         return
 
     payer = persons.by_id(int(payment["person_id"]))
-    collection = pay_svc.collection_of(payment_id)
 
     await _strip_buttons(callback, f"✅ Подтверждено · {persons.label(payer)}")
     await callback.answer("Записал в кассу.")
-
-    if payer and payer["dm_open"]:
-        notify.enqueue(
-            int(payer["id"]),
-            "payment.confirmed",
-            f"✅ Взнос {util.money(payment['amount'], currency=True)} принят"
-            + (f" — {collection['title']}" if collection else ""),
-        )
-    if collection:
-        await _refresh_progress(bot, collection)
+    await publisher.after_confirm(bot, payment)
 
 
 @router.callback_query(F.data.startswith("prej:"))
@@ -405,14 +322,7 @@ async def payment_reject(
     payer = persons.by_id(int(payment["person_id"]))
     await _strip_buttons(callback, f"❌ Отклонено · {persons.label(payer)}")
     await callback.answer("Отметил. Родителю написал.")
-
-    if payer and payer["dm_open"]:
-        notify.enqueue(
-            int(payer["id"]),
-            "payment.rejected",
-            "Казначей пока не нашёл ваш перевод. Проверьте, пожалуйста, "
-            "и пришлите скриншот ещё раз — или свяжитесь с ним напрямую.",
-        )
+    publisher.after_reject(payment)
 
 
 async def _strip_buttons(callback: CallbackQuery, suffix: str) -> None:
@@ -427,49 +337,6 @@ async def _strip_buttons(callback: CallbackQuery, suffix: str) -> None:
             await message.edit_text(f"{message.html_text}\n\n{suffix}", reply_markup=None)
     except Exception:  # noqa: BLE001
         pass
-
-
-async def _refresh_progress(bot: Bot, collection: sqlite3.Row) -> None:
-    """Перерисовывает закреплённое сообщение в группе.
-
-    Показываются только сумма и полоса. Ни имён, ни «17 из 24» — в классе на
-    24 человека такая дробь выдаёт тех, кто не сдал, за минуту (SPEC §2).
-    """
-    klass_row = klass_repo.get(int(collection["class_id"]))
-    if not klass_row or not klass_row["tg_chat_id"] or not collection["tg_message_id"]:
-        return
-
-    card = (klass_row["card_number"], klass_row["card_holder"])
-    progress = money.collection_progress(int(collection["id"]))
-    bar = util.progress_bar(progress["collected"], progress["target"])
-    body = (
-        coll_svc.public_announcement(collection, card)
-        + f"\n\n{bar}\n"
-        + f"Собрано {util.money(progress['collected'])} "
-        + f"из {util.money(progress['target'], currency=True)}"
-    )
-    markup = (
-        InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="💵 Я оплатил", callback_data=f"pay:{collection['id']}"
-                    )
-                ]
-            ]
-        )
-        if collection["status"] == "open"
-        else None
-    )
-    try:
-        await bot.edit_message_text(
-            body,
-            chat_id=klass_row["tg_chat_id"],
-            message_id=collection["tg_message_id"],
-            reply_markup=markup,
-        )
-    except Exception:  # noqa: BLE001 - «message is not modified» и потерянные права
-        log.debug("cannot refresh progress for collection %s", collection["id"])
 
 
 # ── Отчёты ──────────────────────────────────────────────────────────────
@@ -567,16 +434,5 @@ async def cmd_pending(message: Message, class_id: int, roles: set[str]) -> None:
         await message.answer(
             f"🧾 <b>{row['display_name']}</b> · {util.money(row['amount'], currency=True)}\n"
             f"{row['collection_title']}",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text="✅ Подтвердить", callback_data=f"pconf:{row['id']}"
-                        ),
-                        InlineKeyboardButton(
-                            text="❌ Не вижу", callback_data=f"prej:{row['id']}"
-                        ),
-                    ]
-                ]
-            ),
+            reply_markup=publisher.decision_keyboard(int(row["id"])),
         )

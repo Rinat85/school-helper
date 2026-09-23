@@ -17,6 +17,9 @@ def stub_telegram(monkeypatch):
     monkeypatch.setattr(app_module.bot, "delete_webhook", AsyncMock(return_value=True))
     monkeypatch.setattr(app_module.dispatcher, "start_polling", AsyncMock(return_value=None))
     monkeypatch.setattr(app_module.bot.session, "close", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        app_module.bot, "set_chat_menu_button", AsyncMock(return_value=True)
+    )
 
 
 def test_polling_mode_without_domain(fresh_db, stub_telegram, monkeypatch):
@@ -55,3 +58,24 @@ def test_health_reports_revision(fresh_db, stub_telegram, monkeypatch):
 
     with TestClient(app_module.app) as client:
         assert client.get("/health").json()["revision"] == "abc1234"
+
+
+def test_menu_button_opens_mini_app_with_https_domain(fresh_db, stub_telegram, monkeypatch):
+    monkeypatch.setattr(app_module.config, "PUBLIC_URL", "https://class.example.com")
+    monkeypatch.setattr(app_module.config, "WEBHOOK_SECRET", "s3cret")
+
+    with TestClient(app_module.app):
+        pass
+
+    button = app_module.bot.set_chat_menu_button.await_args.kwargs["menu_button"]
+    assert button.web_app.url == "https://class.example.com"
+
+
+def test_no_menu_button_without_domain(fresh_db, stub_telegram, monkeypatch):
+    """Telegram открывает Mini App только по https — без домена кнопку не трогаем."""
+    monkeypatch.setattr(app_module.config, "PUBLIC_URL", "")
+
+    with TestClient(app_module.app):
+        pass
+
+    app_module.bot.set_chat_menu_button.assert_not_awaited()

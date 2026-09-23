@@ -50,6 +50,12 @@ def set_card(class_id: int, number: str, holder: str) -> None:
     )
 
 
+def set_info(class_id: int, name: str, school: str | None) -> None:
+    db.execute(
+        "UPDATE klass SET name = ?, school = ? WHERE id = ?", name, school, class_id
+    )
+
+
 def title(class_id: int) -> str:
     row = get(class_id)
     if not row:

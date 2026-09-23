@@ -9,15 +9,14 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from ..core import roles as roles_mod
-from ..core import util
+from ..services import people as people_svc
 from ..storage import klass as klass_repo
 from ..storage import persons
 from .middleware import deny
 
 router = Router(name="admin")
 
-# Роль parent есть у всех и не снимается; admin выдаётся только через .env.
-ASSIGNABLE = (roles_mod.TREASURER, roles_mod.CHAIR, roles_mod.AUDITOR, roles_mod.TEACHER)
+ASSIGNABLE = people_svc.ASSIGNABLE
 
 
 @router.message(Command("роли", "roles"))
@@ -87,7 +86,7 @@ def _person_view(person_id: int) -> dict:
 
 @router.callback_query(F.data.startswith("rtog:"))
 async def toggle_role(
-    callback: CallbackQuery, person: sqlite3.Row | None, roles: set[str]
+    callback: CallbackQuery, class_id: int, person: sqlite3.Row | None, roles: set[str]
 ) -> None:
     if person is None or not roles_mod.has(roles, "role.grant"):
         await deny(callback, "role.grant")
@@ -95,18 +94,12 @@ async def toggle_role(
 
     _, raw_person, role = callback.data.split(":")
     target_id = int(raw_person)
-    now = util.now_iso()
-
-    if role in roles_mod.roles_of(target_id):
-        if role == roles_mod.CHAIR and target_id == int(person["id"]):
-            await callback.answer(
-                "Нельзя снять председателя с самого себя — сначала назначьте другого.",
-                show_alert=True,
-            )
-            return
-        roles_mod.revoke(target_id, role, by=int(person["id"]), now=now)
-    else:
-        roles_mod.grant(target_id, role, by=int(person["id"]), now=now)
+    enable = role not in roles_mod.roles_of(target_id)
+    try:
+        people_svc.set_role(class_id, int(person["id"]), target_id, role, enable)
+    except people_svc.PeopleError as exc:
+        await callback.answer(str(exc), show_alert=True)
+        return
 
     await callback.message.edit_text(**_person_view(target_id))
     await callback.answer()

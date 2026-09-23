@@ -12,3 +12,6 @@ venv/
 *.egg-info/
 build/
 dist/
+node_modules/
+# Сборка Mini App — собирается в Docker и локально через npm run build
+web/

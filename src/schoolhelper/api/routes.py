@@ -6,11 +6,27 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..core import roles as roles_mod
 from ..services import collections as coll_svc
+from ..services import payments as pay_svc
 from ..storage import klass as klass_repo
 from ..storage import money, persons
 from .deps import Caller, caller
 
 router = APIRouter(prefix="/api")
+
+# Права, по которым интерфейс решает, какие разделы и кнопки показывать.
+# Это только подсказка для отрисовки: каждое действие сервер проверяет заново.
+UI_PERMISSIONS = (
+    "money.view_by_person",
+    "collection.create",
+    "payment.confirm",
+    "expense.approve",
+    "poll.create",
+    "case.close",
+    "audit.view",
+    "role.grant",
+    "person.manage",
+    "class.edit",
+)
 
 
 @router.get("/me")
@@ -29,11 +45,7 @@ async def me(user: Caller = Depends(caller)) -> dict:
             "school": klass_row["school"] if klass_row else None,
             "currency": klass_row["currency"] if klass_row else None,
         },
-        "can": {
-            permission: user.can(permission)
-            for permission in ("collection.create", "payment.confirm", "expense.approve",
-                               "poll.create", "case.close", "audit.view")
-        },
+        "can": {permission: user.can(permission) for permission in UI_PERMISSIONS},
         "sees_money": roles_mod.sees_money(user.roles),
     }
 
@@ -96,3 +108,32 @@ async def not_connected(user: Caller = Depends(caller)) -> list[dict]:
         {"id": int(row["id"]), "name": row["display_name"]}
         for row in persons.not_connected(user.class_id)
     ]
+
+
+@router.get("/home")
+async def home(user: Caller = Depends(caller)) -> dict:
+    """Счётчики для главного экрана: что ждёт действия именно от этого человека."""
+    todo: dict = {}
+    if user.can("payment.confirm"):
+        todo["payments_to_confirm"] = len(pay_svc.pending(user.class_id))
+    if user.can("person.manage"):
+        todo["not_connected"] = sum(
+            1 for row in persons.not_connected(user.class_id) if row["tg_user_id"] is not None
+        )
+    mine = [
+        row for row in money.my_contributions(user.id)
+        if row["collection_status"] == "open"
+        and money.contribution_status(row) in ("pending", "partial", "claimed")
+    ]
+    todo["my_open_contributions"] = [
+        {
+            "collection_id": int(row["collection_id"]),
+            "title": row["title"],
+            "expected": int(row["expected"]),
+            "paid": int(row["paid"]),
+            "due_date": row["due_date"],
+            "status": money.contribution_status(row),
+        }
+        for row in mine
+    ]
+    return todo

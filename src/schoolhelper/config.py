@@ -32,6 +32,9 @@ BOT_TOKEN = _str("BOT_TOKEN")
 BOT_USERNAME = _str("BOT_USERNAME")          # без @, для deep-link
 WEBHOOK_SECRET = _str("WEBHOOK_SECRET")      # путь вебхука: /tg/webhook/<secret>
 PUBLIC_URL = _str("PUBLIC_URL").rstrip("/")  # https://class.example.com
+# 0 — не опрашивать Telegram. Для локальной разработки Mini App, пока тот же
+# бот работает на сервере: два процесса не могут опрашивать один токен.
+BOT_POLLING = _bool("BOT_POLLING", True)
 
 # ── Приложение ──────────────────────────────────────────────────────────
 DB_PATH = Path(_str("DB_PATH", str(ROOT / "data" / "school.db")))
@@ -60,6 +63,11 @@ BOOTSTRAP_CHAIR_TG_ID = _int("BOOTSTRAP_CHAIR_TG_ID", 0)
 # ── Правила ─────────────────────────────────────────────────────────────
 # Расходы до этой суммы утверждаются автоматически (см. SPEC §3.3).
 EXPENSE_AUTO_APPROVE_UZS = _int("EXPENSE_AUTO_APPROVE_UZS", 100_000)
+
+# Локальная разработка Mini App в обычном браузере: заголовок `Authorization: dev`
+# входит под этим tg_user_id. Работает только для запросов с localhost.
+# На сервере НЕ задавать.
+DEV_AUTH_TG_ID = _int("DEV_AUTH_TG_ID", 0)
 
 # Срок годности initData Mini App, секунды.
 INITDATA_TTL_SEC = _int("INITDATA_TTL_SEC", 86_400)

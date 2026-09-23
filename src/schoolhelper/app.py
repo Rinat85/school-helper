@@ -9,16 +9,20 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 
-from aiogram.types import Update
+from aiogram.types import MenuButtonWebApp, Update, WebAppInfo
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config
+from .api.admin import router as admin_router
+from .api.money_admin import router as money_admin_router
 from .api.routes import router as api_router
 from .bot import notify
 from .bot.factory import make_bot, make_dispatcher
 from .core import logger, util
+from .services.payments import PaymentError
+from .services.people import PeopleError
 from .storage import db
 from .storage import klass as klass_repo
 
@@ -46,6 +50,9 @@ async def lifespan(app: FastAPI):
         await bot.set_webhook(url, drop_pending_updates=False)
         STATE["mode"] = "webhook"
         log.info("webhook set")
+    elif not config.BOT_POLLING:
+        STATE["mode"] = "offline"
+        log.warning("BOT_POLLING=0 - telegram updates are NOT received (local UI dev)")
     else:
         await bot.delete_webhook(drop_pending_updates=False)
         # handle_signals=False: сигналами управляет uvicorn, иначе они конфликтуют.
@@ -54,6 +61,8 @@ async def lifespan(app: FastAPI):
         )
         STATE["mode"] = "polling"
         log.info("polling started (no PUBLIC_URL/WEBHOOK_SECRET - webhook skipped)")
+
+    await _setup_menu_button()
 
     STATE["started_at"] = util.now_iso()
     try:
@@ -65,8 +74,35 @@ async def lifespan(app: FastAPI):
         await bot.session.close()
 
 
+async def _setup_menu_button() -> None:
+    """Кнопка меню бота открывает Mini App — главный вход для комитета.
+
+    Telegram открывает Web App только по https, поэтому без домена кнопку
+    не трогаем: пусть остаётся стандартный список команд.
+    """
+    if not config.PUBLIC_URL.startswith("https://"):
+        return
+    try:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(text="Класс", web_app=WebAppInfo(url=config.PUBLIC_URL))
+        )
+        log.info("menu button -> mini app")
+    except Exception:  # noqa: BLE001 - бот работает и без кнопки
+        log.exception("cannot set menu button")
+
+
 app = FastAPI(title="school-helper", lifespan=lifespan)
+app.state.bot = bot
 app.include_router(api_router)
+app.include_router(admin_router)
+app.include_router(money_admin_router)
+
+
+@app.exception_handler(PeopleError)
+@app.exception_handler(PaymentError)
+async def business_rule_error(request: Request, exc: Exception) -> JSONResponse:
+    """Нарушение правила — не сбой: текст ошибки показывается пользователю как есть."""
+    return JSONResponse({"detail": str(exc)}, status_code=400)
 
 
 @app.post("/tg/webhook/{secret}")
@@ -88,7 +124,7 @@ async def health() -> dict:
         people, db_ok = None, False
 
     return {
-        "ok": db_ok and STATE["mode"] in ("polling", "webhook"),
+        "ok": db_ok and STATE["mode"] in ("polling", "webhook", "offline"),
         "mode": STATE["mode"],
         "started_at": STATE["started_at"],
         "revision": config.GIT_SHA or "dev",

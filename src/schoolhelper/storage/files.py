@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 from ..core import util
 from . import db
 
@@ -31,6 +33,10 @@ def save_tg(
         uploaded_by=uploaded_by,
         uploaded_at=util.now_iso(),
     )
+
+
+def get(file_id: int) -> sqlite3.Row | None:
+    return db.one("SELECT * FROM file WHERE id = ?", file_id)
 
 
 def tg_id(file_id: int | None) -> str | None:

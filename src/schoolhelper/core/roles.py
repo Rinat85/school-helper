@@ -51,6 +51,7 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "audit.view":           frozenset({CHAIR, AUDITOR, ADMIN}),
     "role.grant":           frozenset({CHAIR, ADMIN}),
     "person.manage":        frozenset({CHAIR, ADMIN}),
+    "class.edit":           frozenset({CHAIR, ADMIN}),
 }
 
 

@@ -173,32 +173,95 @@ docker stats --no-stream school-helper
 
 ---
 
-## 6. Домен и Mini App (этап 2)
+## 6. Домен и Mini App — `class.spreadis.live`
 
-Пока бот работает опросом, домен не нужен. Он понадобится для Mini App:
-Telegram открывает Web App только по HTTPS.
+Telegram открывает Mini App только по `https://`. Порты 80/443 на сервере держит
+контейнер Caddy от Spreadis, поэтому своего Caddy мы не ставим: подключаемся к его
+docker-сети и добавляем в его Caddyfile один блок.
 
-Caddyfile:
+**Порядок важен.** Если прописать `PUBLIC_URL` раньше, чем заработает HTTPS,
+бот зарегистрирует вебхук на адрес, который Telegram не может открыть, и
+перестанет получать сообщения. Поэтому сначала маршрут, потом переключение.
+
+### 6.1. DNS
+
+A-запись `class` → публичный IPv4 сервера — там же и так же, как уже сделаны
+`api` и `admin` для spreadis.live. Если DNS в Cloudflare — с серым облаком
+(DNS only), как у остальных поддоменов: сертификат выпускает Caddy.
+
+Проверка с любого компьютера: `nslookup class.spreadis.live` — должен вернуть IP сервера.
+
+### 6.2. Подключить бота к сети Caddy
+
+На сервере:
+
+```bash
+docker network ls | grep spreadis
+```
+
+Нужна сеть, в которой сидит `spreadis-caddy` (обычно `<папка-проекта>_spreadis`).
+Проверить: `docker network inspect <имя> | grep spreadis-caddy`.
+
+В `/opt/school-helper/.env` добавить:
 
 ```
-class.example.com {
-    reverse_proxy 127.0.0.1:8080
+COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
+PROXY_NETWORK=<имя сети>
+```
+
+и перезапустить: `cd /opt/school-helper && docker compose up -d`.
+
+### 6.3. Блок в Caddyfile Spreadis
+
+В репозитории `spreadis-deploy`, файл `Caddyfile`, в конец:
+
+```
+# Родительский комитет: Mini App + вебхук Telegram
+class.spreadis.live {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+	header X-Content-Type-Options "nosniff"
+	header Referrer-Policy "strict-origin-when-cross-origin"
+	header -Server
+	# Без X-Frame-Options, в отличие от остальных блоков: Telegram Web
+	# и десктоп открывают Mini App во фрейме, DENY его сломает.
+	reverse_proxy school-helper:8080
 }
 ```
 
-Затем в `.env` на сервере:
+Выкатить Spreadis как обычно (push в `spreadis-deploy`). Caddy сам получит сертификат.
+
+Проверка:
+
+```bash
+curl -s https://class.spreadis.live/health; echo
+```
+
+Должен вернуться тот же JSON, что и с `localhost:8080/health`. Пока это не так —
+к шагу 6.4 не переходить.
+
+### 6.4. Переключить бота на вебхук
+
+В `/opt/school-helper/.env`:
 
 ```
-PUBLIC_URL=https://class.example.com
-WEBHOOK_SECRET=<python -c "import secrets;print(secrets.token_urlsafe(32))">
+PUBLIC_URL=https://class.spreadis.live
+WEBHOOK_SECRET=<python3 -c "import secrets;print(secrets.token_urlsafe(32))">
 ```
 
-`docker compose up -d` — приложение само зарегистрирует вебхук и переключится
-в режим `webhook` (видно в `/health`). Опрос при этом выключается: два режима
-одновременно Telegram не разрешает.
+`docker compose up -d`. Дальше всё само:
 
-Останется привязать Mini App к боту у @BotFather: `/newapp` либо
-`/setmenubutton` с адресом `https://class.example.com`.
+- бот регистрирует вебхук и переключается в режим `webhook` (видно в `/health`);
+- у бота в личке появляется кнопка меню **«Класс»**, открывающая Mini App.
+
+Опрос при этом выключается: два режима одновременно Telegram не разрешает.
+
+### 6.5. Ссылка на Mini App для группы
+
+В группах Telegram не разрешает кнопки, открывающие Web App напрямую. Чтобы
+давать в группу ссылку вида `t.me/<бот>?startapp`, у @BotFather:
+Bot Settings → **Configure Mini App** (или Mini Apps → Main App) → URL
+`https://class.spreadis.live`. Необязательно — кнопка меню в личке работает и без этого.
 
 ---
 

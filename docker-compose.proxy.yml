@@ -1,0 +1,18 @@
+# Подключение к docker-сети Caddy от Spreadis — нужно для домена и Mini App.
+#
+# Включается в .env на сервере (docker compose читает эти переменные сам):
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
+#   PROXY_NETWORK=<имя сети из `docker network ls | grep spreadis`>
+#
+# Отдельным файлом, а не в основном compose: внешняя сеть, которой нет,
+# валит `docker compose up` целиком. Без домена бот работает и так, опросом.
+services:
+  school-helper:
+    networks:
+      - default
+      - proxy
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:?впишите PROXY_NETWORK в .env}

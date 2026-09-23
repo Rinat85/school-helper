@@ -160,6 +160,33 @@ def pending(class_id: int) -> list[sqlite3.Row]:
     )
 
 
+def record_manual(
+    person_id: int,
+    collection_id: int,
+    *,
+    amount: int,
+    method: str,
+    by_person_id: int,
+    idempotency_key: str | None = None,
+) -> sqlite3.Row:
+    """Казначей отмечает взнос сам — наличными или за родителя без Telegram.
+
+    Заявка и подтверждение в одно действие: отдельно подтверждать то, что
+    казначей сам же и внёс, бессмысленно. entered_by фиксирует, кто это сделал.
+    """
+    if amount <= 0:
+        raise PaymentError("сумма должна быть больше нуля")
+    payment_id = claim(
+        person_id,
+        collection_id,
+        amount=amount,
+        method=method,
+        entered_by=by_person_id,
+        idempotency_key=idempotency_key,
+    )
+    return confirm(payment_id, by_person_id)
+
+
 def collection_of(payment_id: int) -> sqlite3.Row | None:
     return db.one(
         "SELECT col.* FROM collection col "

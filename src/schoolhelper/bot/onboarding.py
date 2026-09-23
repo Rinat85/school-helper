@@ -17,6 +17,7 @@ from aiogram.types import (
     ReplyKeyboardRemove,
 )
 
+from .. import config
 from ..core import logger, security, util
 from ..core import roles as roles_mod
 from ..storage import db, persons
@@ -98,6 +99,11 @@ async def start_plain(
     message: Message, state: FSMContext, class_id: int, person: sqlite3.Row | None
 ) -> None:
     if person is None:
+        # Председатель из .env заходит без приглашения: на первом запуске
+        # пригласить его некому, а ходить ради этого в группу — тупик.
+        if config.BOOTSTRAP_CHAIR_TG_ID and message.from_user.id == config.BOOTSTRAP_CHAIR_TG_ID:
+            await _begin(message, state, class_id, None)
+            return
         await message.answer(texts.NOT_A_MEMBER)
         return
     # Уже в классе — просто отмечаем, что личка открыта, и показываем помощь.

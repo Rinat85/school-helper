@@ -133,10 +133,13 @@ def contribution_of(collection_id: int, person_id: int) -> sqlite3.Row | None:
     )
 
 
-def waive(collection_id: int, person_id: int, actor_id: int, note: str | None = None) -> None:
+def set_waived(
+    collection_id: int, person_id: int, actor_id: int, waived: bool, note: str | None = None
+) -> None:
     """Освобождение от взноса — тихое, без статуса «должник» (SPEC §2)."""
     db.execute(
-        "UPDATE contribution SET waived = 1, note = ? WHERE collection_id = ? AND person_id = ?",
+        "UPDATE contribution SET waived = ?, note = ? WHERE collection_id = ? AND person_id = ?",
+        int(waived),
         note,
         collection_id,
         person_id,
@@ -146,11 +149,24 @@ def waive(collection_id: int, person_id: int, actor_id: int, note: str | None = 
         journal.audit(
             row["class_id"],
             actor_id,
-            "contribution.waive",
+            "contribution.waive" if waived else "contribution.unwaive",
             object_type="collection",
             object_id=collection_id,
             after={"person_id": person_id},
         )
+
+
+def waive(collection_id: int, person_id: int, actor_id: int, note: str | None = None) -> None:
+    set_waived(collection_id, person_id, actor_id, True, note)
+
+
+def listing(class_id: int) -> list[sqlite3.Row]:
+    """Открытые сначала, внутри — свежие сверху."""
+    return db.query(
+        "SELECT * FROM collection WHERE class_id = ? AND status IN ('open', 'closed') "
+        "ORDER BY status = 'open' DESC, created_at DESC",
+        class_id,
+    )
 
 
 # ── Тексты ──────────────────────────────────────────────────────────────
