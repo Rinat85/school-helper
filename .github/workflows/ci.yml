@@ -63,7 +63,12 @@ jobs:
         run: |
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"      # GHCR требует нижний регистр
           echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker build \
+          # Кеш слоёв из предыдущего образа: слой с зависимостями Python получает
+          # тот же хеш, и сервер при деплое качает только изменившийся код, а не
+          # десятки мегабайт заново. На медленном диске VPS это решающая разница.
+          DOCKER_BUILDKIT=1 docker build \
+            --cache-from "$IMAGE:latest" \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
             --build-arg "GIT_SHA=${GITHUB_SHA::7}" \
             -t "$IMAGE:$GITHUB_SHA" \
             -t "$IMAGE:latest" \

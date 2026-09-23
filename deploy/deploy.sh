@@ -9,8 +9,9 @@
 #
 # Вручную с сервера:  IMAGE_TAG=latest DEPLOY_SHA=origin/main bash deploy/deploy.sh
 #
-# Что делает: снимок базы -> обновление compose-файлов -> docker compose pull ->
-# запуск -> проверка /health -> откат на предыдущий образ, если health не поднялся.
+# Что делает: снимок базы -> обновление compose-файлов -> docker compose pull
+# (с повторами; не скачалось — ничего не трогаем) -> запуск -> проверка /health ->
+# откат на предыдущий образ, если health не поднялся.
 
 set -euo pipefail
 
@@ -18,7 +19,7 @@ APP_DIR="${APP_DIR:-/opt/school-helper}"
 TARGET="${DEPLOY_SHA:-origin/main}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/health}"
-HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-90}"
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"  # сервер медленный: при забитом диске старт не быстрый
 KEEP_BACKUPS="${KEEP_BACKUPS:-20}"
 TAG_FILE="data/.deployed_tag"
 
@@ -50,15 +51,45 @@ fi
 # ── 2. Обновление репозитория ───────────────────────────────────────────
 # Код в образе, но compose-файл и сам этот скрипт берутся отсюда.
 PREVIOUS_SHA="$(git rev-parse HEAD)"
-PREVIOUS_TAG="$(cat "$TAG_FILE" 2>/dev/null || echo 'latest')"
+# Что крутится прямо сейчас — берём с живого контейнера, файл только запасной.
+# 'latest' для отката не годится: он уже может указывать на новый, непроверенный образ.
+RUNNING_IMAGE="$(docker inspect -f '{{.Config.Image}}' school-helper 2>/dev/null || true)"
+PREVIOUS_TAG="${RUNNING_IMAGE##*:}"
+if [ -z "$RUNNING_IMAGE" ] || [ "$PREVIOUS_TAG" = "$RUNNING_IMAGE" ]; then
+    PREVIOUS_TAG="$(cat "$TAG_FILE" 2>/dev/null || echo 'latest')"
+fi
 git fetch --prune origin
 git reset --hard "$TARGET"
 log "коммит $(git rev-parse --short "$PREVIOUS_SHA") -> $(git rev-parse --short HEAD)"
 log "образ ${PREVIOUS_TAG:0:7} -> ${IMAGE_TAG:0:7}"
 
-# ── 3. Загрузка образа и запуск ─────────────────────────────────────────
+# ── 3. Загрузка образа ──────────────────────────────────────────────────
+# Сначала только скачиваем — работающий контейнер не трогаем. Сеть на этой
+# машине бывает медленной (TLS handshake timeout, когда диск перегружен),
+# поэтому несколько попыток с растущей паузой.
+pull_image() {
+    local attempt
+    for attempt in 1 2 3 4; do
+        if IMAGE_TAG="$1" docker compose pull --quiet; then
+            return 0
+        fi
+        echo "скачивание не удалось (попытка $attempt из 4), жду $((attempt * 15))с" >&2
+        sleep $((attempt * 15))
+    done
+    return 1
+}
+
+log "загрузка образа"
+if ! pull_image "$IMAGE_TAG"; then
+    git reset --hard "$PREVIOUS_SHA"
+    echo "ОШИБКА: образ не скачался. Ничего не переключал — работает ${PREVIOUS_TAG:0:7}" >&2
+    exit 1
+fi
+
+# ── 4. Запуск ───────────────────────────────────────────────────────────
+# Без pull: новый образ уже скачан, а предыдущий лежит локально —
+# откат не должен зависеть от сети.
 start_with() {
-    IMAGE_TAG="$1" docker compose pull --quiet
     IMAGE_TAG="$1" docker compose up -d --remove-orphans
 }
 
@@ -73,7 +104,7 @@ health_ok() {
     return 1
 }
 
-log "загрузка образа и запуск"
+log "запуск"
 start_with "$IMAGE_TAG"
 
 log "проверка $HEALTH_URL"
@@ -86,7 +117,7 @@ if health_ok; then
     exit 0
 fi
 
-# ── 4. Откат ────────────────────────────────────────────────────────────
+# ── 5. Откат ────────────────────────────────────────────────────────────
 echo "ОШИБКА: health не поднялся за ${HEALTH_TIMEOUT}с, откатываюсь" >&2
 docker compose logs --tail 60 || true
 
