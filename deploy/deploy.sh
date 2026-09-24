@@ -104,6 +104,17 @@ health_ok() {
     return 1
 }
 
+# Ручной `docker compose up -d` (без IMAGE_TAG) берёт локальный :latest.
+# Держим его равным тому, что реально работает: иначе ручной перезапуск —
+# очистка базы, смена .env — молча откатывает бота на старую версию.
+pin_latest() {
+    local running
+    running="$(docker inspect -f '{{.Config.Image}}' school-helper 2>/dev/null || true)"
+    if [ -n "$running" ] && [ "${running%:*}" != "$running" ]; then
+        docker tag "$running" "${running%:*}:latest"
+    fi
+}
+
 log "запуск"
 start_with "$IMAGE_TAG"
 
@@ -111,6 +122,7 @@ log "проверка $HEALTH_URL"
 if health_ok; then
     curl -fsS "$HEALTH_URL"; echo
     printf '%s\n' "$IMAGE_TAG" > "$TAG_FILE"
+    pin_latest
     # Старые слои копятся и съедают диск, а места на этой машине немного.
     docker image prune -f --filter 'until=168h' >/dev/null 2>&1 || true
     log "готово"
@@ -125,6 +137,7 @@ git reset --hard "$PREVIOUS_SHA"
 start_with "$PREVIOUS_TAG"
 
 if health_ok; then
+    pin_latest
     echo "откат на образ ${PREVIOUS_TAG:0:7} успешен, бот работает" >&2
 else
     echo "КРИТИЧНО: откат тоже не поднялся — нужен руками" >&2
