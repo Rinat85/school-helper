@@ -14,9 +14,11 @@ onMounted(async () => {
   if (session.me?.sees_money) summary.value = await api.summary().catch(() => null)
 })
 
+/* По значимости, а не по алфавиту ключей: «председатель, казначей», а не наоборот. */
+const ROLE_ORDER = ['chair', 'treasurer', 'auditor', 'teacher']
+
 const roles = computed(() =>
-  (session.me?.roles ?? [])
-    .filter((r) => r !== 'parent' && r !== 'admin')
+  ROLE_ORDER.filter((r) => session.me?.roles.includes(r as never))
     .map((r) => ROLE_NAMES[r])
     .join(', '),
 )
@@ -58,6 +60,10 @@ const nothingToDo = computed(
             <div class="row-title">{{ item.title }}</div>
             <div class="row-sub">
               <template v-if="item.status === 'claimed'">ждёт подтверждения казначея</template>
+              <template v-else-if="item.status === 'partial'">
+                осталось {{ money(item.expected - item.paid, true) }}
+                <template v-if="item.due_date"> · до {{ dateRu(item.due_date) }}</template>
+              </template>
               <template v-else>
                 взнос {{ money(item.expected, true) }}
                 <template v-if="item.due_date"> · до {{ dateRu(item.due_date) }}</template>
@@ -69,11 +75,8 @@ const nothingToDo = computed(
         <RouterLink v-if="home?.payments_to_confirm" to="/payments" class="row chevron">
           <span style="font-size: 22px">🧾</span>
           <div class="row-main">
-            <div class="row-title">
-              {{ home.payments_to_confirm }}
-              {{ plural(home.payments_to_confirm, 'платёж ждёт', 'платежа ждут', 'платежей ждут') }}
-              подтверждения
-            </div>
+            <div class="row-title">Подтвердить платежи</div>
+            <div class="row-sub">сверьте с выпиской по карте</div>
           </div>
           <span class="badge">{{ home.payments_to_confirm }}</span>
         </RouterLink>
@@ -81,12 +84,10 @@ const nothingToDo = computed(
         <RouterLink v-if="home?.not_connected" to="/people" class="row chevron">
           <span style="font-size: 22px">📵</span>
           <div class="row-main">
-            <div class="row-title">
-              {{ home.not_connected }}
-              {{ plural(home.not_connected, 'родитель не подключил', 'родителя не подключили', 'родителей не подключили') }}
-              бота
+            <div class="row-title">Не подключили бота: {{ home.not_connected }}</div>
+            <div class="row-sub">
+              {{ plural(home.not_connected, 'ему', 'им', 'им') }} не приходят напоминания
             </div>
-            <div class="row-sub">им не приходят напоминания</div>
           </div>
         </RouterLink>
       </div>

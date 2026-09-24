@@ -42,6 +42,10 @@ def claim(
         if existing:
             return int(existing["id"])
 
+    reason = claim_blocked(int(contribution["id"]), amount)
+    if reason:
+        raise PaymentError(reason)
+
     return db.insert(
         "payment",
         contribution_id=int(contribution["id"]),
@@ -54,6 +58,49 @@ def claim(
         entered_by=entered_by,
         idempotency_key=idempotency_key,
     )
+
+
+def claim_blocked(contribution_id: int, amount: int | None = None) -> str | None:
+    """Почему по этому взносу нельзя заявить оплату, или None — если можно.
+
+    Без этой проверки «Я оплатил» под старым объявлением принимался и от того,
+    чей взнос уже принят, — и казначей мог подтвердить переплату.
+    """
+    row = db.one(
+        """
+        SELECT c.expected, c.waived,
+               COALESCE(SUM(CASE WHEN p.status = 'confirmed' THEN p.amount END), 0) AS paid,
+               COALESCE(SUM(CASE WHEN p.status = 'claimed' THEN 1 END), 0) AS open_claims
+          FROM contribution c
+          LEFT JOIN payment p ON p.contribution_id = c.id
+         WHERE c.id = ?
+      GROUP BY c.id
+        """,
+        contribution_id,
+    )
+    if row is None:
+        return "нет такого взноса"
+    if row["waived"]:
+        return "вы освобождены от этого взноса"
+    left = int(row["expected"]) - int(row["paid"])
+    if left <= 0:
+        return "взнос уже принят"
+    if row["open_claims"]:
+        return "оплата уже ждёт подтверждения казначея"
+    if amount is not None and amount > left:
+        return f"осталось сдать {util.money(left, currency=True)}, а не {util.money(amount)}"
+    return None
+
+
+def remaining(contribution_id: int) -> int:
+    """Сколько ещё осталось сдать по взносу: у частично сдавших — не вся сумма."""
+    left = db.scalar(
+        "SELECT c.expected - COALESCE(SUM(CASE WHEN p.status = 'confirmed' THEN p.amount END), 0) "
+        "FROM contribution c LEFT JOIN payment p ON p.contribution_id = c.id "
+        "WHERE c.id = ? GROUP BY c.id",
+        contribution_id,
+    )
+    return max(int(left or 0), 0)
 
 
 def confirm(payment_id: int, by_person_id: int) -> sqlite3.Row:

@@ -18,7 +18,7 @@ from aiogram.types import (
 )
 
 from .. import config
-from ..core import logger, security, util
+from ..core import logger, security
 from ..core import roles as roles_mod
 from ..storage import db, persons
 from ..storage import klass as klass_repo
@@ -198,25 +198,3 @@ async def _help(message: Message, roles: set[str]) -> None:
     if roles & {roles_mod.TREASURER, roles_mod.CHAIR, roles_mod.AUDITOR, roles_mod.ADMIN}:
         body += texts.HELP_COMMITTEE
     await message.answer(body)
-
-
-@router.message(Command("кто", "who"))
-async def cmd_who(message: Message, class_id: int, roles: set[str]) -> None:
-    """Кому бот физически не может написать (SPEC §5.5)."""
-    if not roles_mod.has(roles, "person.manage"):
-        await message.answer(texts.NO_PERMISSION.format(roles="председатель"))
-        return
-
-    total = persons.count_active(class_id)
-    pending = persons.not_connected(class_id)
-    if not pending:
-        await message.answer(f"Все {total} подключились — уведомления дойдут до всех.")
-        return
-
-    names = "\n".join(f"• {persons.label(p)}" for p in pending)
-    word = util.plural(len(pending), "родитель", "родителя", "родителей")
-    await message.answer(
-        f"<b>Не подключили бота: {len(pending)} из {total}</b>\n\n{names}\n\n"
-        f"{word.capitalize()} не получит напоминания о взносах и объявления. "
-        f"Пришлите им ссылку: {security.deeplink('join', class_id)}"
-    )

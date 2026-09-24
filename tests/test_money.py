@@ -110,3 +110,61 @@ def test_expense_approval_is_not_available_to_its_author():
     assert roles_mod.has({roles_mod.TREASURER}, "expense.create") is True
     assert roles_mod.has({roles_mod.TREASURER}, "expense.approve") is False
     assert roles_mod.has({roles_mod.CHAIR}, "expense.approve") is True
+
+
+# ── Повторные заявки ────────────────────────────────────────────────────
+# Найдено на живом тесте: «Я оплатил» под старым объявлением принимался и от
+# того, чей взнос уже принят, — казначей мог подтвердить переплату.
+
+
+def _open(parents, amount=50_000):
+    collection_id = coll_svc.create(
+        parents["class_id"], parents["maria"], title="Цветы", amount_per_person=amount
+    )
+    coll_svc.open_(collection_id, parents["maria"])
+    return collection_id
+
+
+def test_no_claim_after_contribution_is_paid(parents):
+    collection_id = _open(parents)
+    pay_svc.confirm(pay_svc.claim(parents["anna"], collection_id, amount=50_000), parents["maria"])
+
+    with pytest.raises(pay_svc.PaymentError, match="уже принят"):
+        pay_svc.claim(parents["anna"], collection_id, amount=50_000)
+
+
+def test_no_second_claim_while_first_is_pending(parents):
+    collection_id = _open(parents)
+    pay_svc.claim(parents["anna"], collection_id, amount=50_000)
+
+    with pytest.raises(pay_svc.PaymentError, match="ждёт подтверждения"):
+        pay_svc.claim(parents["anna"], collection_id, amount=50_000)
+
+
+def test_no_claim_when_waived(parents):
+    collection_id = _open(parents)
+    coll_svc.waive(collection_id, parents["anna"], parents["sergey"])
+
+    with pytest.raises(pay_svc.PaymentError, match="освобождены"):
+        pay_svc.claim(parents["anna"], collection_id, amount=50_000)
+
+
+def test_partial_payer_claims_only_the_rest(parents):
+    collection_id = _open(parents)
+    pay_svc.record_manual(
+        parents["anna"], collection_id, amount=20_000, method="cash", by_person_id=parents["maria"]
+    )
+    contribution = coll_svc.contribution_of(collection_id, parents["anna"])
+    assert pay_svc.remaining(int(contribution["id"])) == 30_000
+
+    with pytest.raises(pay_svc.PaymentError, match="осталось сдать"):
+        pay_svc.claim(parents["anna"], collection_id, amount=50_000)
+    pay_svc.claim(parents["anna"], collection_id, amount=30_000)  # остаток — можно
+
+
+def test_rejected_claim_does_not_block_a_new_one(parents):
+    """Казначей не нашёл перевод — родитель должен суметь прислать чек заново."""
+    collection_id = _open(parents)
+    first = pay_svc.claim(parents["anna"], collection_id, amount=50_000)
+    pay_svc.reject(first, parents["maria"])
+    pay_svc.claim(parents["anna"], collection_id, amount=50_000)

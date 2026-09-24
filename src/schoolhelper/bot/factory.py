@@ -8,7 +8,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from .. import config
-from . import admin, money, onboarding
+from . import money, onboarding
 from .middleware import ContextMiddleware
 
 
@@ -27,6 +27,5 @@ def make_dispatcher() -> Dispatcher:
     dispatcher.callback_query.outer_middleware(context)
 
     dispatcher.include_router(onboarding.router)
-    dispatcher.include_router(admin.router)
     dispatcher.include_router(money.router)
     return dispatcher

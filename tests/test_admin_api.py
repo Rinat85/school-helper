@@ -200,6 +200,20 @@ def test_manual_payment_is_idempotent(client, cls):
     assert money.balance(cls["class_id"]) == 15_000
 
 
+def test_manual_payment_blocked_by_pending_claim(client, cls):
+    """Родитель уже прислал чек — «сдал наличными» поверх него задвоило бы деньги."""
+    collection_id = _create(client)["id"]
+    pay_svc.claim(cls["parent"], collection_id, amount=15_000)
+    response = client.post(
+        f"/api/collections/{collection_id}/payments",
+        json={"person_id": cls["parent"], "method": "cash"},
+        headers=TREASURER,
+    )
+    assert response.status_code == 400
+    assert "ждёт подтверждения" in response.json()["detail"]
+    assert money.balance(cls["class_id"]) == 0
+
+
 def test_only_treasurer_records_payments(client, cls):
     collection_id = _create(client)["id"]
     response = client.post(
