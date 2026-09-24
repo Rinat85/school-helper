@@ -84,6 +84,10 @@ export const api = {
     request<Person>('/people', { method: 'POST', body: { name, child } }),
   editPerson: (id: number, name: string, child: string | null) =>
     request<Person>(`/people/${id}`, { method: 'PATCH', body: { name, child } }),
+  approvePerson: (id: number) =>
+    request<Person & { enrolled: string[] }>(`/people/${id}/approve`, { method: 'POST' }),
+  declinePerson: (id: number) =>
+    request<{ ok: true }>(`/people/${id}/decline`, { method: 'POST' }),
   personLeaves: (id: number) => request<{ ok: true }>(`/people/${id}/leave`, { method: 'POST' }),
   setRole: (id: number, role: string, enabled: boolean) =>
     request<Person>(`/people/${id}/roles/${role}`, { method: 'PUT', body: { enabled } }),

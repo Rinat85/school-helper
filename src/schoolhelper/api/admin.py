@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from ..bot import publisher
 from ..core import security
 from ..services import people as people_svc
 from ..storage import klass as klass_repo
@@ -51,6 +52,26 @@ async def edit_person(person_id: int, body: PersonIn, user: Caller = Depends(cal
 async def person_leaves(person_id: int, user: Caller = Depends(caller)) -> dict:
     user.require("person.manage")
     people_svc.mark_left(user.class_id, user.id, person_id)
+    return {"ok": True}
+
+
+@router.post("/people/{person_id}/approve")
+async def approve_person(person_id: int, user: Caller = Depends(caller)) -> dict:
+    """Впустить пришедшего по ссылке. Он попадает и в уже идущие сборы."""
+    user.require("person.manage")
+    enrolled = people_svc.approve(user.class_id, user.id, person_id)
+    publisher.after_approve(people_svc.get(user.class_id, person_id), enrolled)
+    return {
+        **people_svc.view(people_svc.get(user.class_id, person_id)),
+        "enrolled": [row["title"] for row in enrolled],
+    }
+
+
+@router.post("/people/{person_id}/decline")
+async def decline_person(person_id: int, user: Caller = Depends(caller)) -> dict:
+    user.require("person.manage")
+    people_svc.decline(user.class_id, user.id, person_id)
+    publisher.after_decline(people_svc.get(user.class_id, person_id))
     return {"ok": True}
 
 

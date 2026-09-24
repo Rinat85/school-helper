@@ -4,7 +4,7 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 import { plural, ROLE_NAMES } from '../format'
 import { refreshHome, session } from '../session'
-import { alertDialog, copyText, haptic, shareLink } from '../telegram'
+import { alertDialog, confirmDialog, copyText, haptic, shareLink } from '../telegram'
 import { toast } from '../toast'
 import type { Invite, Person } from '../types'
 
@@ -63,6 +63,46 @@ async function addPerson(): Promise<void> {
   }
 }
 
+/* Пришедшие по ссылке и ещё не впущенные — отдельно и сверху: это решение,
+   которое ждёт председателя. В общем составе их нет. */
+const pending = computed(() => people.value?.filter((p) => !p.approved) ?? [])
+const members = computed(() => people.value?.filter((p) => p.approved) ?? [])
+const deciding = ref<number | null>(null)
+
+async function decide(p: Person, approve: boolean): Promise<void> {
+  if (deciding.value !== null) return
+  if (!approve) {
+    const ok = await confirmDialog(
+      `Отклонить заявку ${p.name}? Человек не попадёт в класс, но сможет подать заявку снова.`,
+    )
+    if (!ok) return
+  }
+  deciding.value = p.id
+  try {
+    if (approve) {
+      const result = await api.approvePerson(p.id)
+      haptic('success')
+      toast(
+        result.enrolled.length
+          ? `${p.name} в классе и в идущих сборах: ${result.enrolled.join(', ')}`
+          : `${p.name} в классе`,
+      )
+    } else {
+      await api.declinePerson(p.id)
+      haptic('warning')
+      toast('Заявка отклонена')
+    }
+    await load()
+    await refreshHome()
+  } catch (e) {
+    haptic('error')
+    await alertDialog((e as Error).message)
+    await load()
+  } finally {
+    deciding.value = null
+  }
+}
+
 function subtitle(p: Person): string {
   const parts: string[] = []
   if (p.child) parts.push(p.child)
@@ -79,13 +119,47 @@ onMounted(refreshHome)
     <h1 class="page-title">Люди</h1>
     <p class="page-subtitle">
       <template v-if="people">
-        {{ people.length }} {{ plural(people.length, 'человек', 'человека', 'человек') }} в классе
+        {{ members.length }} {{ plural(members.length, 'человек', 'человека', 'человек') }} в классе
       </template>
     </p>
 
     <div v-if="error" class="empty danger-text">{{ error }}</div>
 
     <template v-else>
+      <div v-if="pending.length" class="section">
+        <div class="section-title">Ждут подтверждения · {{ pending.length }}</div>
+        <div class="card">
+          <template v-for="p in pending" :key="p.id">
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">{{ p.name }}</div>
+                <div class="row-sub">
+                  <template v-if="p.child">{{ p.child }} · </template>
+                  <template v-if="p.username">@{{ p.username }} · </template>
+                  пришёл(а) по ссылке
+                </div>
+              </div>
+            </div>
+            <div class="btn-row" style="padding: 0 16px 14px">
+              <button class="btn btn-small" :disabled="deciding !== null" @click="decide(p, true)">
+                Впустить
+              </button>
+              <button
+                class="btn btn-small btn-danger"
+                :disabled="deciding !== null"
+                @click="decide(p, false)"
+              >
+                Отклонить
+              </button>
+            </div>
+          </template>
+        </div>
+        <p class="section-note">
+          Пока вы не впустили человека, он не видит кассу, не получает рассылок и не
+          участвует в сборах. После одобрения попадёт и в уже идущие сборы.
+        </p>
+      </div>
+
       <div class="section">
         <div class="section-title">Пригласить родителей</div>
         <div class="card card-pad stack">
@@ -112,7 +186,7 @@ onMounted(refreshHome)
         <div class="section-title">Состав</div>
         <div class="card">
           <RouterLink
-            v-for="p in people"
+            v-for="p in members"
             :key="p.id"
             :to="`/people/${p.id}`"
             class="row chevron"

@@ -83,10 +83,10 @@ async def caller(request: Request, authorization: str = Header(default="")) -> C
 
     class_id = klass_repo.default_id()
     person = persons.by_tg(class_id, tg_user_id)
-    if person is None:
+    if persons.is_pending(person):
+        raise HTTPException(403, "ваша заявка ждёт одобрения председателя")
+    if not persons.is_member(person):
         raise HTTPException(403, "вас нет в списке класса")
-    if person["status"] != "active":
-        raise HTTPException(403, "профиль неактивен")
 
     return Caller(person=person, roles=roles_mod.roles_of(int(person["id"])), class_id=class_id)
 

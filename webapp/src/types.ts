@@ -27,6 +27,7 @@ export type ContributionStatus = 'confirmed' | 'partial' | 'claimed' | 'waived' 
 
 export interface Home {
   payments_to_confirm?: number
+  pending_people?: number
   not_connected?: number
   my_open_contributions: {
     collection_id: number
@@ -87,6 +88,8 @@ export interface Person {
   in_telegram: boolean
   bot_connected: boolean
   status: 'active' | 'left'
+  /** false — пришёл по ссылке и ждёт решения председателя */
+  approved: boolean
   roles: AssignableRole[]
   is_admin: boolean
 }

@@ -30,6 +30,7 @@ const nothingToDo = computed(
   () =>
     !home.value?.my_open_contributions.length &&
     !home.value?.payments_to_confirm &&
+    !home.value?.pending_people &&
     !home.value?.not_connected,
 )
 </script>
@@ -79,6 +80,15 @@ const nothingToDo = computed(
             <div class="row-sub">сверьте с выпиской по карте</div>
           </div>
           <span class="badge">{{ home.payments_to_confirm }}</span>
+        </RouterLink>
+
+        <RouterLink v-if="home?.pending_people" to="/people" class="row chevron">
+          <span style="font-size: 22px">🙋</span>
+          <div class="row-main">
+            <div class="row-title">Заявки в класс</div>
+            <div class="row-sub">пришли по ссылке и ждут вашего решения</div>
+          </div>
+          <span class="badge">{{ home.pending_people }}</span>
         </RouterLink>
 
         <RouterLink v-if="home?.not_connected" to="/people" class="row chevron">

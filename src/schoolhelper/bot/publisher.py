@@ -177,3 +177,64 @@ async def refresh_progress(bot: Bot, collection: sqlite3.Row) -> None:
             )
         except Exception:  # noqa: BLE001
             pass
+
+
+# ── Заявки на вступление ────────────────────────────────────────────────
+
+
+def join_keyboard(person_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Впустить", callback_data=f"join:ok:{person_id}"),
+                InlineKeyboardButton(text="✖️ Отклонить", callback_data=f"join:no:{person_id}"),
+            ]
+        ]
+    )
+
+
+async def notify_join_request(bot: Bot, candidate: sqlite3.Row) -> None:
+    """Председателям — карточка заявки. То же самое есть во вкладке «Люди»."""
+    username = f" · @{candidate['tg_username']}" if candidate["tg_username"] else ""
+    text = (
+        "🙋 <b>Заявка в класс</b>\n"
+        f"{persons.label(candidate)}{username}\n\n"
+        "Пришёл(а) по ссылке-приглашению. Пока вы не решите, человек не видит "
+        "кассу и не получает рассылок."
+    )
+    for chair in persons.with_role(int(candidate["class_id"]), roles_mod.CHAIR):
+        if not chair["dm_open"]:
+            continue
+        try:
+            await bot.send_message(
+                chair["tg_user_id"], text, reply_markup=join_keyboard(int(candidate["id"]))
+            )
+        except Exception:  # noqa: BLE001
+            log.warning("cannot notify chair %s about join request", chair["id"])
+
+
+def after_approve(person: sqlite3.Row, enrolled: list[sqlite3.Row]) -> None:
+    """Новенькому — «вас впустили», и по напоминанию на каждый идущий сбор."""
+    from . import menu, texts  # здесь: menu и texts не нужны остальным функциям модуля
+
+    url = menu.app_url()
+    buttons = [[{"text": "Открыть приложение класса", "web_app": {"url": url}}]] if url else []
+    notify.enqueue(
+        int(person["id"]),
+        "person.approved",
+        texts.APPROVED + "\n\n" + texts.PRIVACY_NOTICE,
+        buttons=buttons,
+    )
+    for collection in enrolled:
+        notify.enqueue(
+            int(person["id"]),
+            "collection.new",
+            coll_svc.private_reminder(collection),
+            buttons=[[{"text": "💵 Я оплатил", "callback_data": f"pay:{collection['id']}"}]],
+        )
+
+
+def after_decline(person: sqlite3.Row) -> None:
+    from . import texts
+
+    notify.enqueue(int(person["id"]), "person.declined", texts.DECLINED)

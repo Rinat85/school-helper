@@ -79,9 +79,16 @@ def insert(table: str, **values: Any) -> int:
 
 
 def migrate() -> None:
-    """Применяет schema.sql. Идемпотентно — все CREATE идут с IF NOT EXISTS."""
+    """Исходная схема (schema.sql, идемпотентна) + недостающие миграции.
+
+    schema.sql не правится: изменения существующих таблиц — только миграциями,
+    см. storage/migrations.py.
+    """
+    from . import migrations  # здесь, а не наверху: migrations импортирует core
+
     conn = connect()
     conn.executescript(_SCHEMA.read_text(encoding="utf-8"))
+    migrations.apply(conn)
 
 
 def get_meta(key: str, default: str | None = None) -> str | None:

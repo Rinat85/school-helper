@@ -9,6 +9,7 @@ from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
+    CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -20,10 +21,11 @@ from aiogram.types import (
 from .. import config
 from ..core import logger, security
 from ..core import roles as roles_mod
+from ..services import people as people_svc
 from ..storage import klass as klass_repo
 from ..storage import persons
-from . import access, menu, texts
-from .middleware import display_name_of
+from . import access, menu, publisher, texts
+from .middleware import deny, display_name_of
 
 log = logger.get(__name__)
 router = Router(name="onboarding")
@@ -85,7 +87,6 @@ async def start_with_payload(
     command: CommandObject,
     state: FSMContext,
     class_id: int,
-    person: sqlite3.Row | None,
 ) -> None:
     parsed = security.verify_deeplink_payload(command.args or "")
     if parsed is None or parsed[0] != "join":
@@ -93,18 +94,25 @@ async def start_with_payload(
         return
 
     target_class = int(parsed[1])
-    await _begin(message, state, target_class, person)
+    await _begin(message, state, target_class)
 
 
 @router.message(CommandStart(deep_link=False), F.chat.type == "private")
 async def start_plain(
-    message: Message, state: FSMContext, class_id: int, person: sqlite3.Row | None
+    message: Message,
+    state: FSMContext,
+    class_id: int,
+    person: sqlite3.Row | None,
+    candidate: sqlite3.Row | None,
 ) -> None:
     if person is None:
+        if persons.is_pending(candidate):
+            await message.answer(texts.PENDING_WAIT)
+            return
         # Председатель из .env заходит без приглашения: на первом запуске
         # пригласить его некому, а ходить ради этого в группу — тупик.
         if config.BOOTSTRAP_CHAIR_TG_ID and message.from_user.id == config.BOOTSTRAP_CHAIR_TG_ID:
-            await _begin(message, state, class_id, None)
+            await _begin(message, state, class_id)
             return
         await message.answer(texts.NOT_A_MEMBER)
         return
@@ -119,9 +127,9 @@ async def start_plain(
     await _help(message, roles_mod.roles_of(int(person["id"])))
 
 
-async def _begin(
-    message: Message, state: FSMContext, class_id: int, person: sqlite3.Row | None
-) -> None:
+async def _begin(message: Message, state: FSMContext, class_id: int) -> None:
+    """Новенький по ссылке заводится в статусе «ждёт одобрения» (кроме председателя
+    из .env) и заполняет анкету; по её окончании председателю уходит заявка."""
     user = message.from_user
     row = persons.upsert_from_tg(
         class_id,
@@ -131,8 +139,8 @@ async def _begin(
     )
     await message.answer(texts.WELCOME.format(klass=klass_repo.title(class_id)))
 
-    if person is not None and person["child_name"]:
-        # Повторный /start у уже заполненного профиля — анкету не гоняем.
+    if persons.is_member(row) and row["child_name"]:
+        # Повторный переход по ссылке у своего — анкету не гоняем.
         await _help(message, roles_mod.roles_of(int(row["id"])))
         return
 
@@ -179,6 +187,15 @@ async def _finish(message: Message, state: FSMContext, child: str | None) -> Non
     persons.set_names(person_id, name, child)
     await state.clear()
 
+    row = persons.by_id(person_id)
+    if persons.is_pending(row):
+        await message.answer(
+            texts.PENDING_THANKS.format(name=name), reply_markup=ReplyKeyboardRemove()
+        )
+        await publisher.notify_join_request(message.bot, row)
+        log.info("person %s asked to join class %s", person_id, class_id)
+        return
+
     await message.answer(
         texts.ONBOARD_DONE.format(name=name, klass=klass_repo.title(class_id)),
         reply_markup=ReplyKeyboardRemove(),
@@ -193,11 +210,59 @@ async def _finish(message: Message, state: FSMContext, child: str | None) -> Non
 
 
 @router.message(Command("help", "помощь"), F.chat.type == "private")
-async def cmd_help(message: Message, person: sqlite3.Row | None, roles: set[str]) -> None:
+async def cmd_help(
+    message: Message,
+    person: sqlite3.Row | None,
+    candidate: sqlite3.Row | None,
+    roles: set[str],
+) -> None:
     if person is None:
-        await message.answer(texts.NOT_A_MEMBER)
+        await message.answer(
+            texts.PENDING_WAIT if persons.is_pending(candidate) else texts.NOT_A_MEMBER
+        )
         return
     await _help(message, roles)
+
+
+# ── Решение по заявке ───────────────────────────────────────────────────
+
+
+@router.callback_query(F.data.startswith("join:"))
+async def join_decision(
+    callback: CallbackQuery, class_id: int, person: sqlite3.Row | None, roles: set[str]
+) -> None:
+    """Кнопки «Впустить / Отклонить» из карточки заявки у председателя."""
+    if person is None or not roles_mod.has(roles, "person.manage"):
+        await deny(callback, "person.manage")
+        return
+
+    _, verdict, raw_id = callback.data.split(":")
+    target_id = int(raw_id)
+    try:
+        if verdict == "ok":
+            enrolled = people_svc.approve(class_id, int(person["id"]), target_id)
+            publisher.after_approve(persons.by_id(target_id), enrolled)
+            outcome = "✅ Впущен(а)"
+            if enrolled:
+                outcome += " · добавлен(а) в идущие сборы: " + ", ".join(
+                    f"«{c['title']}»" for c in enrolled
+                )
+        else:
+            people_svc.decline(class_id, int(person["id"]), target_id)
+            publisher.after_decline(persons.by_id(target_id))
+            outcome = "✖️ Отклонено"
+    except people_svc.PeopleError as exc:
+        # Второй председатель мог уже решить — или решили во вкладке «Люди».
+        outcome = f"Уже рассмотрено: {exc}"
+
+    if callback.message:
+        try:
+            await callback.message.edit_text(
+                f"{callback.message.html_text}\n\n{outcome}", reply_markup=None
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    await callback.answer()
 
 
 async def _help(message: Message, roles: set[str]) -> None:

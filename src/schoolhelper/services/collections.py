@@ -133,6 +133,26 @@ def contribution_of(collection_id: int, person_id: int) -> sqlite3.Row | None:
     )
 
 
+def enroll_in_open(class_id: int, person_id: int) -> list[sqlite3.Row]:
+    """Новый участник в уже идущих сборах — с той же суммой, что у остальных.
+
+    Иначе одобренный родитель видит сбор в приложении, а «Я оплатил» отвечает
+    «вас нет в списке». Если платить ему не нужно — казначей освободит.
+    """
+    enrolled = []
+    for collection in open_ones(class_id):
+        if contribution_of(int(collection["id"]), person_id) is not None:
+            continue
+        db.insert(
+            "contribution",
+            collection_id=int(collection["id"]),
+            person_id=person_id,
+            expected=int(collection["amount_per_person"]),
+        )
+        enrolled.append(collection)
+    return enrolled
+
+
 def set_waived(
     collection_id: int, person_id: int, actor_id: int, waived: bool, note: str | None = None
 ) -> None:

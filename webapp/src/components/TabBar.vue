@@ -22,7 +22,8 @@ const tabs = computed<Tab[]>(() => {
     list.push({ to: '/payments', label: 'Платежи', icon: 'check', badge: home?.payments_to_confirm })
   }
   if (can('person.manage')) {
-    list.push({ to: '/people', label: 'Люди', icon: 'people', badge: home?.not_connected })
+    // Красный счётчик — только то, что ждёт решения: заявки в класс.
+    list.push({ to: '/people', label: 'Люди', icon: 'people', badge: home?.pending_people })
   }
   if (can('class.edit') || can('collection.create')) {
     list.push({ to: '/settings', label: 'Класс', icon: 'gear' })

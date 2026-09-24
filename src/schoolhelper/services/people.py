@@ -24,7 +24,9 @@ class PeopleError(Exception):
 def listing(class_id: int, *, include_left: bool = False) -> list[dict]:
     where = "class_id = ?" if include_left else "class_id = ? AND status = 'active'"
     rows = db.query(
-        f"SELECT * FROM person WHERE {where} ORDER BY status, display_name", class_id
+        f"SELECT * FROM person WHERE {where} "
+        "ORDER BY status, approved_at IS NOT NULL, display_name",  # ждущие — сверху
+        class_id,
     )
     return [view(row) for row in rows]
 
@@ -39,6 +41,7 @@ def view(row: sqlite3.Row) -> dict:
         "in_telegram": row["tg_user_id"] is not None,
         "bot_connected": bool(row["dm_open"]),
         "status": row["status"],
+        "approved": row["approved_at"] is not None,
         "roles": sorted(own & set(ASSIGNABLE)),
         "is_admin": roles_mod.ADMIN in own,
     }
@@ -79,6 +82,31 @@ def update(class_id: int, actor_id: int, person_id: int, name: str, child: str |
     )
 
 
+def approve(class_id: int, actor_id: int, person_id: int) -> list[sqlite3.Row]:
+    """Впустить в класс. Возвращает открытые сборы, в которые человек записан."""
+    from . import collections as coll_svc  # здесь: collections тоже импортирует persons
+
+    row = get(class_id, person_id)
+    if not persons.is_pending(row):
+        raise PeopleError("заявка уже рассмотрена")
+    persons.approve(person_id, actor_id)
+    enrolled = coll_svc.enroll_in_open(class_id, person_id)
+    journal.audit(
+        class_id, actor_id, "person.approve", object_type="person", object_id=person_id,
+        after={"enrolled_collections": [int(c["id"]) for c in enrolled]},
+    )
+    return enrolled
+
+
+def decline(class_id: int, actor_id: int, person_id: int) -> None:
+    """Не впускать. Человек сможет подать заявку снова по ссылке."""
+    row = get(class_id, person_id)
+    if not persons.is_pending(row):
+        raise PeopleError("заявка уже рассмотрена")
+    persons.mark_left(person_id)
+    journal.audit(class_id, actor_id, "person.decline", object_type="person", object_id=person_id)
+
+
 def mark_left(class_id: int, actor_id: int, person_id: int) -> None:
     """Ушёл из класса. Запись и история денег остаются, роли снимаются."""
     get(class_id, person_id)
@@ -96,6 +124,8 @@ def set_role(class_id: int, actor_id: int, person_id: int, role: str, enabled: b
     row = get(class_id, person_id)
     if row["status"] != "active":
         raise PeopleError("человек уже не в классе")
+    if row["approved_at"] is None:
+        raise PeopleError("сначала одобрите участие")
 
     if enabled:
         if role in roles_mod.roles_of(person_id):

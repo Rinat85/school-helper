@@ -117,6 +117,7 @@ async def home(user: Caller = Depends(caller)) -> dict:
     if user.can("payment.confirm"):
         todo["payments_to_confirm"] = len(pay_svc.pending(user.class_id))
     if user.can("person.manage"):
+        todo["pending_people"] = len(persons.pending(user.class_id))
         todo["not_connected"] = sum(
             1 for row in persons.not_connected(user.class_id) if row["tg_user_id"] is not None
         )

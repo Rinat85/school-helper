@@ -18,7 +18,7 @@ from ..storage import persons
 
 
 class ContextMiddleware(BaseMiddleware):
-    """Кладёт в data: class_id, person (Row | None), roles (set[str])."""
+    """Кладёт в data: class_id, candidate и person (Row | None), roles (set[str])."""
 
     async def __call__(
         self,
@@ -38,9 +38,13 @@ class ContextMiddleware(BaseMiddleware):
         if class_id is None:
             class_id = klass_repo.default_id()
 
-        person = persons.by_tg(class_id, user.id) if user else None
+        candidate = persons.by_tg(class_id, user.id) if user else None
+        # Хэндлеры видят «своего» только в одобренном участнике: ждущий одобрения
+        # или исключённый для них посторонний. Сырая запись — для онбординга.
+        person = candidate if persons.is_member(candidate) else None
 
         data["class_id"] = class_id
+        data["candidate"] = candidate
         data["person"] = person
         data["roles"] = roles_mod.roles_of(int(person["id"])) if person else set()
         return await handler(event, data)

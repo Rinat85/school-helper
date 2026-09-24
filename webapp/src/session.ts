@@ -24,8 +24,9 @@ export async function loadSession(): Promise<void> {
     if (error instanceof ApiError && error.status === 401) {
       session.blocked = 'Откройте приложение из Telegram — через кнопку в боте класса.'
     } else if (error instanceof ApiError && error.status === 403) {
-      session.blocked =
-        'Вас пока нет в списке класса. Попросите председателя прислать ссылку-приглашение.'
+      session.blocked = error.message.includes('одобрения')
+        ? 'Ваша заявка ждёт подтверждения председателя класса. Как только он её рассмотрит, бот напишет.'
+        : 'Вас пока нет в списке класса. Попросите председателя прислать ссылку-приглашение.'
     } else {
       session.blocked = 'Не удалось загрузиться. Проверьте связь и откройте приложение ещё раз.'
     }
