@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 
 from . import config
-from .bot import notify
+from .bot import menu, notify
 from .bot.factory import make_bot, make_dispatcher
 from .core import logger
 from .storage import db
@@ -39,6 +39,7 @@ async def main() -> None:
         log.warning("BOT_USERNAME is empty - deep links will be broken; set it to %s", me.username)
 
     await bot.delete_webhook(drop_pending_updates=False)
+    await menu.setup_commands(bot)
     pump = asyncio.create_task(notify.pump_forever(bot))
     try:
         await dispatcher.start_polling(bot)

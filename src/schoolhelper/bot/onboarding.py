@@ -20,9 +20,9 @@ from aiogram.types import (
 from .. import config
 from ..core import logger, security
 from ..core import roles as roles_mod
-from ..storage import db, persons
 from ..storage import klass as klass_repo
-from . import texts
+from ..storage import persons
+from . import access, menu, texts
 from .middleware import display_name_of
 
 log = logger.get(__name__)
@@ -37,17 +37,11 @@ class Onboard(StatesGroup):
 # ── /setup в группе ─────────────────────────────────────────────────────
 
 
-@router.message(Command("setup"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("setup"), F.chat.type.in_(access.GROUP_TYPES))
 async def cmd_setup(message: Message, class_id: int, roles: set[str]) -> None:
-    if not roles_mod.has(roles, "person.manage"):
-        # Первичная настройка: если председателя ещё нет, разрешаем любому,
-        # иначе привязать группу было бы некому.
-        chair_exists = db.scalar(
-            "SELECT 1 FROM person_role WHERE role = 'chair' AND revoked_at IS NULL"
-        )
-        if chair_exists:
-            await message.answer(texts.NO_PERMISSION.format(roles="председатель"))
-            return
+    if not access.may_bind_group(message.from_user.id, roles):
+        await message.answer("Привязать группу к классу может только председатель.")
+        return
 
     existing = klass_repo.by_chat(message.chat.id)
     if existing is None:
@@ -77,7 +71,15 @@ async def cmd_setup(message: Message, class_id: int, roles: set[str]) -> None:
 # ── /start ──────────────────────────────────────────────────────────────
 
 
-@router.message(CommandStart(deep_link=True))
+@router.message(Command("setup"), F.chat.type == "private")
+async def cmd_setup_private(message: Message) -> None:
+    await message.answer(
+        "Эту команду нужно написать в самой группе класса — после того, как добавите "
+        "туда бота администратором."
+    )
+
+
+@router.message(CommandStart(deep_link=True), F.chat.type == "private")
 async def start_with_payload(
     message: Message,
     command: CommandObject,
@@ -94,7 +96,7 @@ async def start_with_payload(
     await _begin(message, state, target_class, person)
 
 
-@router.message(CommandStart(deep_link=False))
+@router.message(CommandStart(deep_link=False), F.chat.type == "private")
 async def start_plain(
     message: Message, state: FSMContext, class_id: int, person: sqlite3.Row | None
 ) -> None:
@@ -181,20 +183,28 @@ async def _finish(message: Message, state: FSMContext, child: str | None) -> Non
         texts.ONBOARD_DONE.format(name=name, klass=klass_repo.title(class_id)),
         reply_markup=ReplyKeyboardRemove(),
     )
-    await message.answer(texts.PRIVACY_NOTICE)
+    await message.answer(texts.PRIVACY_NOTICE, reply_markup=menu.app_keyboard())
     log.info("person %s onboarded in class %s", person_id, class_id)
 
 
-# ── Помощь и служебное ──────────────────────────────────────────────────
+# ── Помощь ──────────────────────────────────────────────────────────────
+# Команд, кроме /start, у бота нет: всё остальное — в приложении класса.
+# /help не показывается в меню, но срабатывает — его набирают по привычке.
 
 
-@router.message(Command("help", "помощь"))
-async def cmd_help(message: Message, roles: set[str]) -> None:
+@router.message(Command("help", "помощь"), F.chat.type == "private")
+async def cmd_help(message: Message, person: sqlite3.Row | None, roles: set[str]) -> None:
+    if person is None:
+        await message.answer(texts.NOT_A_MEMBER)
+        return
     await _help(message, roles)
 
 
 async def _help(message: Message, roles: set[str]) -> None:
-    body = texts.HELP_PARENT
-    if roles & {roles_mod.TREASURER, roles_mod.CHAIR, roles_mod.AUDITOR, roles_mod.ADMIN}:
-        body += texts.HELP_COMMITTEE
-    await message.answer(body)
+    committee = bool(roles & {roles_mod.TREASURER, roles_mod.CHAIR, roles_mod.AUDITOR})
+    keyboard = menu.app_keyboard()
+    if keyboard is None:
+        await message.answer(texts.HOME_NO_APP)
+        return
+    body = texts.HOME + (texts.HOME_COMMITTEE if committee else "")
+    await message.answer(body, reply_markup=keyboard)

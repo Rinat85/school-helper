@@ -18,7 +18,7 @@ from . import config
 from .api.admin import router as admin_router
 from .api.money_admin import router as money_admin_router
 from .api.routes import router as api_router
-from .bot import notify
+from .bot import menu, notify
 from .bot.factory import make_bot, make_dispatcher
 from .core import logger, util
 from .services.payments import PaymentError
@@ -47,7 +47,13 @@ async def lifespan(app: FastAPI):
     # публичного домена ещё нет и бот работает опросом.
     if config.PUBLIC_URL and config.WEBHOOK_SECRET:
         url = f"{config.PUBLIC_URL}/tg/webhook/{config.WEBHOOK_SECRET}"
-        await bot.set_webhook(url, drop_pending_updates=False)
+        # Явный список типов апдейтов: без my_chat_member бот не узнает,
+        # что его добавили в чужую группу, и не выйдет из неё.
+        await bot.set_webhook(
+            url,
+            drop_pending_updates=False,
+            allowed_updates=dispatcher.resolve_used_update_types(),
+        )
         STATE["mode"] = "webhook"
         log.info("webhook set")
     elif not config.BOT_POLLING:
@@ -63,6 +69,7 @@ async def lifespan(app: FastAPI):
         log.info("polling started (no PUBLIC_URL/WEBHOOK_SECRET - webhook skipped)")
 
     await _setup_menu_button()
+    await menu.setup_commands(bot)
 
     STATE["started_at"] = util.now_iso()
     try:

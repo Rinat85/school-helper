@@ -17,9 +17,8 @@ def stub_telegram(monkeypatch):
     monkeypatch.setattr(app_module.bot, "delete_webhook", AsyncMock(return_value=True))
     monkeypatch.setattr(app_module.dispatcher, "start_polling", AsyncMock(return_value=None))
     monkeypatch.setattr(app_module.bot.session, "close", AsyncMock(return_value=None))
-    monkeypatch.setattr(
-        app_module.bot, "set_chat_menu_button", AsyncMock(return_value=True)
-    )
+    for name in ("set_chat_menu_button", "set_my_commands", "delete_my_commands"):
+        monkeypatch.setattr(app_module.bot, name, AsyncMock(return_value=True))
 
 
 def test_polling_mode_without_domain(fresh_db, stub_telegram, monkeypatch):
@@ -45,9 +44,10 @@ def test_webhook_mode_with_domain(fresh_db, stub_telegram, monkeypatch):
         body = client.get("/health").json()
 
     assert body["mode"] == "webhook"
-    app_module.bot.set_webhook.assert_awaited_once_with(
-        "https://class.example.com/tg/webhook/s3cret", drop_pending_updates=False
-    )
+    call = app_module.bot.set_webhook.await_args
+    assert call.args == ("https://class.example.com/tg/webhook/s3cret",)
+    # без my_chat_member бот не узнает, что его добавили в чужую группу
+    assert "my_chat_member" in call.kwargs["allowed_updates"]
     app_module.dispatcher.start_polling.assert_not_awaited()
 
 

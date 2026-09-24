@@ -1,6 +1,6 @@
-"""Деньги в боте: «Я оплатил», быстрые кнопки казначея, /касса и /мои.
+"""Деньги в боте: «Я оплатил» и быстрые кнопки казначея в личке.
 
-Создание сборов и очередь платежей — в Mini App (кнопка «Класс»).
+Касса, свои взносы, создание сборов и очередь платежей — в Mini App.
 """
 
 from __future__ import annotations
@@ -11,17 +11,14 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import (
-    CallbackQuery,
-    Message,
-)
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from ..core import logger, util
 from ..core import roles as roles_mod
 from ..services import collections as coll_svc
 from ..services import payments as pay_svc
-from ..storage import files, money, persons
-from . import publisher, texts
+from ..storage import files, persons
+from . import publisher
 from .middleware import deny
 
 log = logger.get(__name__)
@@ -35,12 +32,25 @@ class ClaimPayment(StatesGroup):
 # ── Выход из диалога ────────────────────────────────────────────────────
 
 
-@router.message(Command("cancel", "отмена"), StateFilter("*"))
+@router.message(Command("cancel", "отмена"), StateFilter("*"), F.chat.type == "private")
 async def cmd_cancel(message: Message, state: FSMContext) -> None:
     if await state.get_state() is None:
         return
     await state.clear()
     await message.answer("Отменено.")
+
+
+CANCEL_KEYBOARD = InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="paycancel")]]
+)
+
+
+@router.callback_query(F.data == "paycancel")
+async def pay_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer("Отменено")
 
 
 # ── Родитель заявляет оплату ────────────────────────────────────────────
@@ -83,7 +93,7 @@ async def pay_start(
     )
     # В группе отвечаем в личку, чтобы разговор о деньгах не шёл при всех.
     try:
-        await callback.bot.send_message(callback.from_user.id, text)
+        await callback.bot.send_message(callback.from_user.id, text, reply_markup=CANCEL_KEYBOARD)
         await callback.answer("Написал вам в личные сообщения.")
     except Exception:  # noqa: BLE001
         await callback.answer(
@@ -210,82 +220,3 @@ async def _strip_buttons(callback: CallbackQuery, suffix: str) -> None:
             await message.edit_text(f"{message.html_text}\n\n{suffix}", reply_markup=None)
     except Exception:  # noqa: BLE001
         pass
-
-
-# ── Отчёты ──────────────────────────────────────────────────────────────
-
-
-@router.message(Command("касса", "money"))
-async def cmd_balance(message: Message, class_id: int, roles: set[str]) -> None:
-    if not roles_mod.sees_money(roles):
-        await message.answer("Денежный раздел учителю не показывается.")
-        return
-
-    summary = money.summary(class_id)
-    lines = [
-        "💰 <b>Касса класса</b>",
-        f"Остаток: <b>{util.money(summary['balance'], currency=True)}</b>",
-        "",
-        f"Поступило: {util.money(summary['inflow'])}",
-        f"Потрачено: {util.money(summary['outflow'])}",
-    ]
-
-    open_collections = coll_svc.open_ones(class_id)
-    if open_collections:
-        lines.append("\n<b>Открытые сборы</b>")
-        for collection in open_collections:
-            progress = money.collection_progress(int(collection["id"]))
-            lines.append(
-                f"• {collection['title']} — "
-                f"{util.money(progress['collected'])} из {util.money(progress['target'])} "
-                f"({progress['percent']}%)"
-            )
-
-    recent = money.ledger(class_id, limit=5)
-    if recent:
-        lines.append("\n<b>Последние операции</b>")
-        for entry in recent:
-            sign = "+" if entry["direction"] == "in" else "−"
-            lines.append(
-                f"{sign}{util.money(entry['amount'])} · {entry['memo'] or entry['source_type']} "
-                f"· {util.date_ru(entry['occurred_at'])}"
-            )
-
-    await message.answer("\n".join(lines))
-
-
-@router.message(Command("мои", "mine"))
-async def cmd_my_contributions(message: Message, person: sqlite3.Row | None) -> None:
-    if person is None:
-        await message.answer(texts.NOT_A_MEMBER)
-        return
-
-    rows = money.my_contributions(int(person["id"]))
-    if not rows:
-        await message.answer("Взносов пока нет.")
-        return
-
-    icons = {
-        "confirmed": "✅",
-        "partial": "🟡",
-        "claimed": "⏳",
-        "waived": "—",
-        "pending": "⚪",
-    }
-    words = {
-        "confirmed": "принят",
-        "partial": "частично",
-        "claimed": "ждёт подтверждения",
-        "waived": "не требуется",
-        "pending": "ожидается",
-    }
-
-    lines = ["<b>Мои взносы</b>", ""]
-    for row in rows:
-        status = money.contribution_status(row)
-        due = f" · до {util.date_ru(row['due_date'])}" if row["due_date"] else ""
-        lines.append(
-            f"{icons[status]} {row['title']} — {util.money(row['expected'])} "
-            f"({words[status]}){due}"
-        )
-    await message.answer("\n".join(lines))

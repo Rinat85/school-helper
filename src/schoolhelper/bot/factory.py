@@ -8,7 +8,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from .. import config
-from . import money, onboarding
+from . import access, money, onboarding
 from .middleware import ContextMiddleware
 
 
@@ -25,7 +25,9 @@ def make_dispatcher() -> Dispatcher:
     context = ContextMiddleware()
     dispatcher.message.outer_middleware(context)
     dispatcher.callback_query.outer_middleware(context)
+    dispatcher.my_chat_member.outer_middleware(context)  # «бота добавили в группу»
 
+    dispatcher.include_router(access.router)
     dispatcher.include_router(onboarding.router)
     dispatcher.include_router(money.router)
     return dispatcher
