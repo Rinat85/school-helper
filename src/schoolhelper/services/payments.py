@@ -92,6 +92,25 @@ def claim_blocked(contribution_id: int, amount: int | None = None) -> str | None
     return None
 
 
+def awaiting_payment(person_id: int) -> list[tuple[sqlite3.Row, int]]:
+    """Открытые сборы, где от человека ещё ждут денег и заявку подать можно.
+
+    Нужен, когда чек пришёл без нажатия «Я оплатил»: понять, к чему его приложить.
+    Возвращает пары (сбор, сколько осталось сдать).
+    """
+    rows = db.query(
+        "SELECT col.*, c.id AS contribution_id FROM contribution c "
+        "JOIN collection col ON col.id = c.collection_id "
+        "WHERE c.person_id = ? AND col.status = 'open' ORDER BY col.created_at",
+        person_id,
+    )
+    return [
+        (row, remaining(int(row["contribution_id"])))
+        for row in rows
+        if claim_blocked(int(row["contribution_id"])) is None
+    ]
+
+
 def remaining(contribution_id: int) -> int:
     """Сколько ещё осталось сдать по взносу: у частично сдавших — не вся сумма."""
     left = db.scalar(
