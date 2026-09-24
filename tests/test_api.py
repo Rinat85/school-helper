@@ -70,3 +70,14 @@ def test_money_is_hidden_from_teacher(client, fresh_db):
 
 def test_webhook_secret_must_match(client):
     assert client.post("/tg/webhook/wrong-secret", json={}).status_code == 404
+
+
+def test_cache_headers(client, fresh_db):
+    """Старый index.html после выкатки ведёт на удалённые файлы экранов —
+    «кнопка не нажимается». Его нельзя кешировать без перепроверки."""
+    persons.create(fresh_db, "Анна", tg_user_id=560, dm_open=True)
+    assert client.get("/api/me", headers=auth(560)).headers["cache-control"] == "no-store"
+
+    page = client.get("/")
+    if page.status_code == 200:  # web/ есть только после сборки фронтенда
+        assert page.headers["cache-control"] == "no-cache"

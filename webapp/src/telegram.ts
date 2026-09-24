@@ -63,16 +63,39 @@ export function haptic(kind: Haptic): void {
   else h.notificationOccurred(kind)
 }
 
+/* Всплывающие окна Telegram бросают исключение, если текст длиннее 256 символов
+   или если другое окно ещё открыто. Непойманное исключение выглядело бы так,
+   будто кнопка просто не нажимается, — поэтому обрезаем текст и при любой
+   ошибке падаем на браузерный confirm/alert. */
+const POPUP_LIMIT = 256
+
+function clip(text: string): string {
+  return text.length > POPUP_LIMIT ? `${text.slice(0, POPUP_LIMIT - 1)}…` : text
+}
+
 export function confirmDialog(message: string): Promise<boolean> {
   if (tg?.showConfirm && tg.isVersionAtLeast('6.2')) {
-    return new Promise((resolve) => tg.showConfirm!(message, resolve))
+    return new Promise((resolve) => {
+      try {
+        tg.showConfirm!(clip(message), resolve)
+      } catch {
+        resolve(window.confirm(message))
+      }
+    })
   }
   return Promise.resolve(window.confirm(message))
 }
 
 export function alertDialog(message: string): Promise<void> {
   if (tg?.showAlert && tg.isVersionAtLeast('6.2')) {
-    return new Promise((resolve) => tg.showAlert!(message, () => resolve()))
+    return new Promise((resolve) => {
+      try {
+        tg.showAlert!(clip(message), () => resolve())
+      } catch {
+        window.alert(message)
+        resolve()
+      }
+    })
   }
   window.alert(message)
   return Promise.resolve()

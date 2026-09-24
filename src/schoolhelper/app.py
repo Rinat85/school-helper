@@ -105,6 +105,26 @@ app.include_router(admin_router)
 app.include_router(money_admin_router)
 
 
+@app.middleware("http")
+async def cache_headers(request: Request, call_next):
+    """Кто что кеширует.
+
+    index.html — всегда перепроверять (ETag делает это дёшево): в нём имена
+    файлов текущей сборки, и старая копия после выкатки ведёт на файлы, которых
+    уже нет. Файлы из /assets/ с хешем в имени не меняются никогда — их можно
+    хранить сколько угодно. Ответы API — не кешировать вовсе: там деньги и люди.
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/assets/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    elif path == "/" or path.endswith(".html"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.exception_handler(PeopleError)
 @app.exception_handler(PaymentError)
 async def business_rule_error(request: Request, exc: Exception) -> JSONResponse:
