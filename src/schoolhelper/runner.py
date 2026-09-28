@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 
 from . import config
-from .bot import menu, notify
+from .bot import menu, notify, reminders
 from .bot.factory import make_bot, make_dispatcher
 from .core import logger
 from .storage import db
@@ -40,11 +40,15 @@ async def main() -> None:
 
     await bot.delete_webhook(drop_pending_updates=False)
     await menu.setup_commands(bot)
-    pump = asyncio.create_task(notify.pump_forever(bot))
+    background = [
+        asyncio.create_task(notify.pump_forever(bot)),
+        asyncio.create_task(reminders.run_forever()),
+    ]
     try:
         await dispatcher.start_polling(bot)
     finally:
-        pump.cancel()
+        for task in background:
+            task.cancel()
         await bot.session.close()
 
 

@@ -18,11 +18,13 @@ from . import config
 from .api.admin import router as admin_router
 from .api.money_admin import router as money_admin_router
 from .api.routes import router as api_router
-from .bot import menu, notify
+from .api.schedule import router as schedule_router
+from .bot import menu, notify, reminders
 from .bot.factory import make_bot, make_dispatcher
 from .core import logger, util
 from .services.payments import PaymentError
 from .services.people import PeopleError
+from .services.schedule import ScheduleError
 from .storage import db
 from .storage import klass as klass_repo
 
@@ -41,7 +43,10 @@ async def lifespan(app: FastAPI):
     class_id = klass_repo.ensure_seeded()
     log.info("db ready, class_id=%s", class_id)
 
-    tasks: list[asyncio.Task] = [asyncio.create_task(notify.pump_forever(bot))]
+    tasks: list[asyncio.Task] = [
+        asyncio.create_task(notify.pump_forever(bot)),
+        asyncio.create_task(reminders.run_forever()),
+    ]
 
     # HTTP-сервер поднимается в обоих режимах: деплою нужен /health, даже когда
     # публичного домена ещё нет и бот работает опросом.
@@ -103,6 +108,7 @@ app.state.bot = bot
 app.include_router(api_router)
 app.include_router(admin_router)
 app.include_router(money_admin_router)
+app.include_router(schedule_router)
 
 
 @app.middleware("http")
@@ -127,6 +133,7 @@ async def cache_headers(request: Request, call_next):
 
 @app.exception_handler(PeopleError)
 @app.exception_handler(PaymentError)
+@app.exception_handler(ScheduleError)
 async def business_rule_error(request: Request, exc: Exception) -> JSONResponse:
     """Нарушение правила — не сбой: текст ошибки показывается пользователю как есть."""
     return JSONResponse({"detail": str(exc)}, status_code=400)

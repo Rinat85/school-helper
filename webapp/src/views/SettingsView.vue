@@ -3,9 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 
 import { api } from '../api'
 import { can, session } from '../session'
-import { alertDialog, haptic } from '../telegram'
+import { alertDialog, confirmDialog, haptic } from '../telegram'
 import { toast } from '../toast'
-import type { Settings } from '../types'
+import type { ChatRole, Settings } from '../types'
 
 const settings = ref<Settings | null>(null)
 const error = ref('')
@@ -70,6 +70,47 @@ async function save(patch: Partial<Settings>): Promise<void> {
   }
 }
 
+const CHAT_ROLES: ChatRole[] = ['parents', 'committee', 'teacher']
+const CHAT_NAMES: Record<ChatRole, string> = {
+  parents: 'Родительский чат',
+  committee: 'Чат комитета',
+  teacher: 'Чат с учителем',
+}
+
+function chatOf(role: ChatRole) {
+  return settings.value?.chats.find((c) => c.role === role)
+}
+
+async function unbind(role: ChatRole): Promise<void> {
+  const ok = await confirmDialog(
+    `Отвязать «${chatOf(role)?.title ?? CHAT_NAMES[role]}»? Бот останется в группе, ` +
+      'удалить его оттуда можно вручную.',
+  )
+  if (!ok) return
+  await act(() => api.unbindChat(role))
+}
+
+async function forgetTeacher(): Promise<void> {
+  const ok = await confirmDialog(
+    'Перестать читать сообщения учительницы автоматически? Пересылать расписание боту можно и дальше.',
+  )
+  if (!ok) return
+  await act(() => api.forgetTeacher())
+}
+
+async function act(call: () => Promise<Settings>): Promise<void> {
+  busy.value = true
+  try {
+    fill(await call())
+    haptic('success')
+  } catch (e) {
+    haptic('error')
+    await alertDialog((e as Error).message)
+  } finally {
+    busy.value = false
+  }
+}
+
 function saveInfo(): Promise<void> {
   // Пустая строка, а не null: null сервер понимает как «не менять», а школу нужно уметь стереть.
   return save({ name: name.value.trim(), school: school.value.trim() })
@@ -93,17 +134,49 @@ function saveCard(): Promise<void> {
 
     <template v-else>
       <div class="section">
+        <div class="section-title">Чаты класса в Telegram</div>
         <div class="card">
-          <div class="row">
-            <div class="row-main">Группа класса в Telegram</div>
-            <span class="chip" :class="settings.group_bound ? 'chip-success' : 'chip-warning'">
-              {{ settings.group_bound ? 'привязана' : 'не привязана' }}
-            </span>
+          <div v-for="role in CHAT_ROLES" :key="role" class="row">
+            <div class="row-main">
+              <div class="row-title">{{ CHAT_NAMES[role] }}</div>
+              <div class="row-sub">{{ chatOf(role)?.title ?? 'не подключён' }}</div>
+            </div>
+            <button
+              v-if="chatOf(role) && can('class.edit')"
+              class="btn btn-small btn-secondary"
+              :disabled="busy"
+              @click="unbind(role)"
+            >
+              Отвязать
+            </button>
+            <span v-else-if="!chatOf(role)" class="chip chip-warning">нет</span>
+          </div>
+          <div v-if="chatOf('teacher')" class="row">
+            <div class="row-main">
+              <div class="row-title">Учительница</div>
+              <div class="row-sub">
+                {{
+                  settings.teacher
+                    ? `${settings.teacher.name} — её расписание бот читает сам`
+                    : 'не отмечена — пересылайте расписание боту'
+                }}
+              </div>
+            </div>
+            <button
+              v-if="settings.teacher && can('class.edit')"
+              class="btn btn-small btn-secondary"
+              :disabled="busy"
+              @click="forgetTeacher"
+            >
+              Забыть
+            </button>
           </div>
         </div>
-        <p v-if="!settings.group_bound" class="section-note">
-          Добавьте бота в группу класса администратором и напишите там <code>/setup</code>.
-          Пока группа не привязана, объявления о сборах уходят только в личку.
+        <p class="section-note">
+          Чтобы подключить чат, добавьте в него бота администратором и напишите там
+          <code>/setup</code> — бот спросит в личке, что это за чат. В чат с учителем бот
+          ничего не пишет. Учительницу он узнает, если в том чате ответить на её сообщение
+          командой <code>/учитель</code>.
         </p>
       </div>
 

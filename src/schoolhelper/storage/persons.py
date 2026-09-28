@@ -45,6 +45,23 @@ def active(class_id: int) -> list[sqlite3.Row]:
     )
 
 
+def parents(class_id: int) -> list[sqlite3.Row]:
+    """Участники без тех, кто в классе только как учитель.
+
+    С них собирают взносы и им рассылаются напоминания. Учителю денежный контур
+    не показывается вообще (SPEC §3.2) — значит, и сборы ему не приходят.
+    """
+    return db.query(
+        f"SELECT * FROM person p WHERE class_id = ? AND {MEMBER} AND NOT EXISTS ("
+        "  SELECT 1 FROM person_role r WHERE r.person_id = p.id AND r.revoked_at IS NULL"
+        "  AND r.role = 'teacher'"
+        "  AND NOT EXISTS (SELECT 1 FROM person_role m WHERE m.person_id = p.id"
+        "    AND m.revoked_at IS NULL AND m.role IN ('treasurer', 'chair', 'auditor', 'admin'))"
+        ") ORDER BY display_name",
+        class_id,
+    )
+
+
 def count_active(class_id: int) -> int:
     return int(
         db.scalar(f"SELECT COUNT(*) FROM person WHERE class_id = ? AND {MEMBER}", class_id) or 0

@@ -15,7 +15,7 @@ from ..core import logger, util
 from ..core import roles as roles_mod
 from ..services import collections as coll_svc
 from ..services import payments as pay_svc
-from ..storage import db, files, money, persons
+from ..storage import chats, db, files, money, persons
 from ..storage import klass as klass_repo
 from . import notify
 
@@ -50,12 +50,13 @@ async def announce_collection(bot: Bot, collection_id: int) -> dict:
     klass_row = klass_repo.get(int(collection["class_id"]))
     card = (klass_row["card_number"], klass_row["card_holder"]) if klass_row else (None, None)
     posted = False
+    group = chats.chat_id(int(collection["class_id"]), chats.PARENTS)
 
-    # 1. В группу — объявление без имён.
-    if klass_row and klass_row["tg_chat_id"]:
+    # 1. В родительский чат — объявление без имён.
+    if group is not None:
         try:
             sent = await bot.send_message(
-                klass_row["tg_chat_id"],
+                group,
                 coll_svc.public_announcement(collection, card),
                 reply_markup=pay_keyboard(collection_id),
             )
@@ -69,13 +70,13 @@ async def announce_collection(bot: Bot, collection_id: int) -> dict:
                 collection_id,
             )
             try:
-                await bot.pin_chat_message(klass_row["tg_chat_id"], sent.message_id)
+                await bot.pin_chat_message(group, sent.message_id)
             except Exception:  # noqa: BLE001 - нет права закреплять, не повод падать
-                log.warning("cannot pin message in chat %s", klass_row["tg_chat_id"])
+                log.warning("cannot pin message in chat %s", group)
 
     # 2. Каждому лично — только его взнос.
     queued = notify.enqueue_many(
-        persons.active(int(collection["class_id"])),
+        persons.parents(int(collection["class_id"])),
         "collection.new",
         coll_svc.private_reminder(collection),
         buttons=[[{"text": "💵 Я оплатил", "callback_data": f"pay:{collection_id}"}]],
@@ -147,7 +148,8 @@ async def refresh_progress(bot: Bot, collection: sqlite3.Row) -> None:
     """
     collection = coll_svc.get(int(collection["id"])) or collection  # свежий статус
     klass_row = klass_repo.get(int(collection["class_id"]))
-    if not klass_row or not klass_row["tg_chat_id"] or not collection["tg_message_id"]:
+    group = chats.chat_id(int(collection["class_id"]), chats.PARENTS)
+    if not klass_row or group is None or not collection["tg_message_id"]:
         return
 
     card = (klass_row["card_number"], klass_row["card_holder"])
@@ -164,7 +166,7 @@ async def refresh_progress(bot: Bot, collection: sqlite3.Row) -> None:
     try:
         await bot.edit_message_text(
             body,
-            chat_id=klass_row["tg_chat_id"],
+            chat_id=group,
             message_id=collection["tg_message_id"],
             reply_markup=None if closed else pay_keyboard(int(collection["id"])),
         )
@@ -172,9 +174,7 @@ async def refresh_progress(bot: Bot, collection: sqlite3.Row) -> None:
         log.debug("cannot refresh progress for collection %s", collection["id"])
     if closed:
         try:
-            await bot.unpin_chat_message(
-                klass_row["tg_chat_id"], message_id=collection["tg_message_id"]
-            )
+            await bot.unpin_chat_message(group, message_id=collection["tg_message_id"])
         except Exception:  # noqa: BLE001
             pass
 

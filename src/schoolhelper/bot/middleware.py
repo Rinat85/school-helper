@@ -13,8 +13,8 @@ from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject, User
 
 from ..core import roles as roles_mod
+from ..storage import chats, persons
 from ..storage import klass as klass_repo
-from ..storage import persons
 
 
 class ContextMiddleware(BaseMiddleware):
@@ -33,8 +33,8 @@ class ContextMiddleware(BaseMiddleware):
         if chat is None and isinstance(event, CallbackQuery) and event.message:
             chat = event.message.chat
         if chat is not None and chat.type in ("group", "supergroup"):
-            row = klass_repo.by_chat(chat.id)
-            class_id = int(row["id"]) if row else None
+            row = chats.get(chat.id)
+            class_id = int(row["class_id"]) if row else None
         if class_id is None:
             class_id = klass_repo.default_id()
 

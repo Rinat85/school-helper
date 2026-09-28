@@ -149,10 +149,11 @@ def _create(client, **extra) -> dict:
 
 
 def test_create_collection_announces_to_everyone(client):
+    """Каждому родителю — но не учительнице: денежный контур ей не показывается."""
     created = _create(client)
     assert created["status"] == "open"
-    assert created["target"] == 15_000 * 4
-    assert created["queued"] == 4          # личное сообщение каждому
+    assert created["target"] == 15_000 * 3
+    assert created["queued"] == 3          # личное сообщение каждому родителю
     assert created["posted_to_group"] is False  # группа не привязана
 
 
@@ -180,7 +181,7 @@ def test_roster_only_for_money_roles(client):
     assert parent_view["mine"] == {"expected": 15_000, "paid": 0, "status": "pending"}
 
     treasurer_view = client.get(f"/api/collections/{collection_id}", headers=TREASURER).json()
-    assert len(treasurer_view["roster"]) == 4
+    assert len(treasurer_view["roster"]) == 3  # учительница в сбор не записана
 
 
 def test_teacher_sees_no_collections(client):
@@ -246,8 +247,8 @@ def test_pending_queue_confirm_and_reject(client, cls):
 def test_waive_lowers_target(client, cls):
     collection_id = _create(client)["id"]
     url = f"/api/collections/{collection_id}/people/{cls['parent']}/waive"
-    assert client.put(url, json={"waived": True}, headers=TREASURER).json()["target"] == 45_000
-    assert client.put(url, json={"waived": False}, headers=TREASURER).json()["target"] == 60_000
+    assert client.put(url, json={"waived": True}, headers=TREASURER).json()["target"] == 30_000
+    assert client.put(url, json={"waived": False}, headers=TREASURER).json()["target"] == 45_000
 
 
 def test_close_collection_once(client):

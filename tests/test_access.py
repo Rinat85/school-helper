@@ -10,7 +10,7 @@ import pytest
 from schoolhelper import config
 from schoolhelper.bot import access, menu
 from schoolhelper.core import roles as roles_mod
-from schoolhelper.storage import klass as klass_repo
+from schoolhelper.storage import chats
 
 CHAIR = {roles_mod.PARENT, roles_mod.CHAIR}
 PARENT = {roles_mod.PARENT}
@@ -51,17 +51,17 @@ def test_no_bootstrap_means_no_exception(monkeypatch):
 
 
 def test_stays_in_class_group_whoever_added(bootstrap):
-    assert access.may_stay(-100, bound_chat_id=-100, adder_tg_id=5, adder_roles=PARENT)
+    assert access.may_stay(-100, bound_chat_ids={-100}, adder_tg_id=5, adder_roles=PARENT)
 
 
 def test_leaves_foreign_group_added_by_parent(bootstrap):
     """Родитель позвал бота в посторонний чат — там не должно быть ничего о классе."""
-    assert not access.may_stay(-200, bound_chat_id=-100, adder_tg_id=5, adder_roles=PARENT)
+    assert not access.may_stay(-200, bound_chat_ids={-100}, adder_tg_id=5, adder_roles=PARENT)
 
 
 def test_chair_may_bring_bot_to_new_group(bootstrap):
     """Переезд класса в новый чат: председатель добавляет, потом делает /setup."""
-    assert access.may_stay(-200, bound_chat_id=-100, adder_tg_id=5, adder_roles=CHAIR)
+    assert access.may_stay(-200, bound_chat_ids={-100}, adder_tg_id=5, adder_roles=CHAIR)
 
 
 def _event(chat_id: int, adder: int, status: str = "member"):
@@ -73,7 +73,7 @@ def _event(chat_id: int, adder: int, status: str = "member"):
 
 
 async def test_handler_leaves_foreign_group(fresh_db, bootstrap):
-    klass_repo.bind_chat(fresh_db, -100)
+    chats.bind(fresh_db, -100, chats.PARENTS, "1 В", 1000)
     bot = SimpleNamespace(send_message=AsyncMock(), leave_chat=AsyncMock())
 
     await access.added_to_group(_event(-200, adder=5), bot, fresh_db, PARENT)
@@ -82,10 +82,21 @@ async def test_handler_leaves_foreign_group(fresh_db, bootstrap):
 
 
 async def test_handler_stays_in_class_group(fresh_db, bootstrap):
-    klass_repo.bind_chat(fresh_db, -100)
+    chats.bind(fresh_db, -100, chats.PARENTS, "1 В", 1000)
     bot = SimpleNamespace(send_message=AsyncMock(), leave_chat=AsyncMock())
 
     await access.added_to_group(_event(-100, adder=5), bot, fresh_db, PARENT)
+
+    bot.leave_chat.assert_not_awaited()
+
+
+async def test_handler_stays_in_every_class_chat(fresh_db, bootstrap):
+    """Чатов у класса три — из комитета и чата с учителем бот тоже не уходит."""
+    chats.bind(fresh_db, -100, chats.PARENTS, "Родители", 1000)
+    chats.bind(fresh_db, -300, chats.TEACHER, "С учителем", 1000)
+    bot = SimpleNamespace(send_message=AsyncMock(), leave_chat=AsyncMock())
+
+    await access.added_to_group(_event(-300, adder=5), bot, fresh_db, PARENT)
 
     bot.leave_chat.assert_not_awaited()
 

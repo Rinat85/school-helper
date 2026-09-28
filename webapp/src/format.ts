@@ -53,3 +53,22 @@ export function parseAmount(text: string): number {
   const digits = text.replace(/\D/g, '')
   return digits ? Number(digits) : 0
 }
+
+const WEEKDAYS = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
+
+/** Сегодняшняя дата в местном времени: '2026-09-28'. */
+export function todayIso(): string {
+  return new Date().toLocaleDateString('sv-SE')
+}
+
+/** '2026-09-29' -> «Завтра, вторник, 29 сентября» / «Среда, 30 сентября». */
+export function dayTitle(date: string, today = todayIso()): string {
+  const day = new Date(`${date}T12:00:00`)
+  const base = new Date(`${today}T12:00:00`)
+  const delta = Math.round((day.getTime() - base.getTime()) / 86_400_000)
+  const label = `${WEEKDAYS[day.getDay()]}, ${dateRu(date)}`
+  if (delta === 0) return `Сегодня, ${label}`
+  if (delta === 1) return `Завтра, ${label}`
+  if (delta === -1) return `Вчера, ${label}`
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}

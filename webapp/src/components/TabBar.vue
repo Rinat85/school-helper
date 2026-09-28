@@ -16,7 +16,10 @@ interface Tab {
    денежные вкладки не видны вообще — как и в боте (SPEC §3.2). */
 const tabs = computed<Tab[]>(() => {
   const home = session.home
-  const list: Tab[] = [{ to: '/', label: 'Главная', icon: 'home' }]
+  const list: Tab[] = [
+    { to: '/', label: 'Главная', icon: 'home' },
+    { to: '/schedule', label: 'Уроки', icon: 'calendar' },
+  ]
   if (session.me?.sees_money) list.push({ to: '/collections', label: 'Сборы', icon: 'coins' })
   if (can('payment.confirm')) {
     list.push({ to: '/payments', label: 'Платежи', icon: 'check', badge: home?.payments_to_confirm })
@@ -42,6 +45,7 @@ const ICONS: Record<string, string> = {
   coins:
     'M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3zm8 6c0 1.7-3.6 3-8 3s-8-1.3-8-3m16 3c0 1.7-3.6 3-8 3s-8-1.3-8-3m16 3c0 1.7-3.6 3-8 3s-8-1.3-8-3M4 6v12m16-12v12',
   check: 'M4 12.5 9.5 18 20 6',
+  calendar: 'M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v12a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5zM4 10h16M8 3v4m8-4v4',
   people:
     'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 10a7 7 0 0 1 14 0M17 11a3 3 0 1 0 0-6m2 16a6 6 0 0 0-3-5.2',
   gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm7.4-3a7.4 7.4 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7.3 7.3 0 0 0-2-1.2L14.5 3h-5l-.4 2.6a7.3 7.3 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7.4 7.4 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7.3 7.3 0 0 0 2 1.2l.4 2.6h5l.4-2.6a7.3 7.3 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z',

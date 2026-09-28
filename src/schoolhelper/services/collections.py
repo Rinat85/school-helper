@@ -48,7 +48,7 @@ def create(
             payment_code(collection_id),
             collection_id,
         )
-        for person in persons.active(class_id):
+        for person in persons.parents(class_id):
             db.insert(
                 "contribution",
                 collection_id=collection_id,

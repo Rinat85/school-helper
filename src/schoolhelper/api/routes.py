@@ -26,6 +26,7 @@ UI_PERMISSIONS = (
     "role.grant",
     "person.manage",
     "class.edit",
+    "timetable.edit",
 )
 
 

@@ -1,4 +1,4 @@
-"""Класс: создание при первом запуске, привязка к группе Telegram."""
+"""Класс: создание при первом запуске, реквизиты, учительница."""
 
 from __future__ import annotations
 
@@ -33,12 +33,23 @@ def default_id() -> int:
     return ensure_seeded()
 
 
-def by_chat(tg_chat_id: int) -> sqlite3.Row | None:
-    return db.one("SELECT * FROM klass WHERE tg_chat_id = ?", tg_chat_id)
+# Чаты класса — в storage/chats.py. Колонка klass.tg_chat_id осталась от первой
+# версии и больше не читается (миграция 2 перенесла её в class_chat).
 
 
-def bind_chat(class_id: int, tg_chat_id: int) -> None:
-    db.execute("UPDATE klass SET tg_chat_id = ? WHERE id = ?", tg_chat_id, class_id)
+def set_teacher(class_id: int, tg_user_id: int | None, name: str | None) -> None:
+    """Чьи сообщения в чате с учителем бот читает как расписание."""
+    db.execute(
+        "UPDATE klass SET teacher_tg_user_id = ?, teacher_name = ? WHERE id = ?",
+        tg_user_id,
+        name,
+        class_id,
+    )
+
+
+def is_teacher(class_id: int, tg_user_id: int) -> bool:
+    row = get(class_id)
+    return bool(row) and row["teacher_tg_user_id"] == tg_user_id
 
 
 def set_card(class_id: int, number: str, holder: str) -> None:

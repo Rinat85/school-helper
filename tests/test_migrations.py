@@ -36,7 +36,7 @@ def test_existing_people_stay_members(tmp_path):
     conn = _legacy_db(tmp_path)
     assert "approved_at" not in _columns(conn, "person")
 
-    assert migrations.apply(conn) == [1]
+    assert migrations.apply(conn) == [1, 2]
 
     row = conn.execute("SELECT approved_at, joined_at FROM person").fetchone()
     assert row["approved_at"] == row["joined_at"]
@@ -46,7 +46,7 @@ def test_second_run_changes_nothing(tmp_path):
     conn = _legacy_db(tmp_path)
     migrations.apply(conn)
     assert migrations.apply(conn) == []
-    assert migrations.version(conn) == 1
+    assert migrations.version(conn) == len(migrations.MIGRATIONS)
 
 
 def test_fresh_database_is_fully_migrated(fresh_db):
@@ -65,10 +65,23 @@ def test_failed_migration_leaves_no_trace(tmp_path, monkeypatch):
         raise RuntimeError("упала посередине")
 
     extended = [*migrations.MIGRATIONS, (99, "сломанная", broken)]
+    migrations_before = len(migrations.MIGRATIONS)
     monkeypatch.setattr(migrations, "MIGRATIONS", extended)
     with pytest.raises(RuntimeError):
         migrations.apply(conn)
 
     tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master")}
     assert "half_done" not in tables
-    assert migrations.version(conn) == 1
+    assert migrations.version(conn) == migrations_before
+
+
+def test_bound_group_becomes_parents_chat(tmp_path):
+    """Группа, привязанная до ролей чатов, остаётся родительской — сборы идут туда же."""
+    conn = _legacy_db(tmp_path)
+    conn.execute("UPDATE klass SET tg_chat_id = -100123")
+
+    migrations.apply(conn)
+
+    rows = conn.execute("SELECT class_id, tg_chat_id, role FROM class_chat").fetchall()
+    assert [tuple(row) for row in rows] == [(1, -100123, "parents")]
+    assert {"teacher_tg_user_id", "teacher_name"} <= _columns(conn, "klass")

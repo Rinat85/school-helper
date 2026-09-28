@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import html
 import sqlite3
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -22,8 +23,8 @@ from .. import config
 from ..core import logger, security
 from ..core import roles as roles_mod
 from ..services import people as people_svc
+from ..storage import chats, persons
 from ..storage import klass as klass_repo
-from ..storage import persons
 from . import access, menu, publisher, texts
 from .middleware import deny, display_name_of
 
@@ -40,34 +41,91 @@ class Onboard(StatesGroup):
 
 
 @router.message(Command("setup"), F.chat.type.in_(access.GROUP_TYPES))
-async def cmd_setup(message: Message, class_id: int, roles: set[str]) -> None:
+async def cmd_setup(message: Message, bot: Bot, class_id: int, roles: set[str]) -> None:
+    """Роль чата спрашиваем в личке: чат может оказаться чатом с учителем,
+    а туда бот не пишет даже вопрос «что это за чат»."""
     if not access.may_bind_group(message.from_user.id, roles):
-        await message.answer("Привязать группу к классу может только председатель.")
+        if not chats.is_read_only(message.chat.id):
+            await message.answer("Привязать группу к классу может только председатель.")
         return
 
-    existing = klass_repo.by_chat(message.chat.id)
-    if existing is None:
-        klass_repo.bind_chat(class_id, message.chat.id)
-        log.info("bound chat %s to class %s", message.chat.id, class_id)
+    current = chats.get(message.chat.id)
+    body = texts.SETUP_ASK.format(
+        title=html.escape(message.chat.title or "без названия"),
+        klass=klass_repo.title(class_id),
+        current=texts.SETUP_CURRENT.format(role=chats.RU[current["role"]]) if current else "",
+    )
+    try:
+        await bot.send_message(
+            message.from_user.id, body, reply_markup=_chat_role_keyboard(message.chat.id)
+        )
+    except Exception:  # noqa: BLE001 - личка закрыта: в группу не пишем, это может быть чат с учителем
+        log.warning("cannot ask %s about chat %s role", message.from_user.id, message.chat.id)
 
-    name = klass_repo.title(class_id)
-    body = (
-        texts.SETUP_GROUP.format(klass=name)
-        if existing is None
-        else texts.SETUP_ALREADY.format(klass=name)
-    )
-    await message.answer(
-        body,
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="Подключиться", url=security.deeplink("join", class_id)
-                    )
-                ]
+
+def _chat_role_keyboard(chat_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text=chats.RU[role], callback_data=f"bind:{role}:{chat_id}")
+                for role in chats.ROLES
             ]
-        ),
+        ]
     )
+
+
+def _join_keyboard(class_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Подключиться", url=security.deeplink("join", class_id))]
+        ]
+    )
+
+
+@router.callback_query(F.data.startswith("bind:"))
+async def bind_chat_role(
+    callback: CallbackQuery, bot: Bot, class_id: int, roles: set[str]
+) -> None:
+    if not access.may_bind_group(callback.from_user.id, roles):
+        await deny(callback, "person.manage")
+        return
+    _, role, raw_chat = callback.data.split(":")
+    chat_id = int(raw_chat)
+    if role not in chats.ROLES:
+        await callback.answer()
+        return
+    try:
+        chat = await bot.get_chat(chat_id)
+    except Exception:  # noqa: BLE001
+        await callback.answer("Меня уже нет в этой группе.", show_alert=True)
+        return
+
+    title = chat.title or "без названия"
+    chats.bind(class_id, chat_id, role, title, callback.from_user.id)
+    log.info("chat %s bound to class %s as %s", chat_id, class_id, role)
+
+    klass = klass_repo.title(class_id)
+    if role == chats.TEACHER:
+        done = texts.SETUP_TEACHER_DONE.format(title=html.escape(title))
+    else:
+        done = f"✅ «{html.escape(title)}» подключён: {chats.RU[role].lower()} чат."
+        try:
+            if role == chats.PARENTS:
+                await bot.send_message(
+                    chat_id, texts.SETUP_GROUP.format(klass=klass),
+                    reply_markup=_join_keyboard(class_id),
+                )
+            else:
+                await bot.send_message(chat_id, texts.SETUP_COMMITTEE.format(klass=klass))
+        except Exception:  # noqa: BLE001 - нет права писать: привязка всё равно сделана
+            log.warning("cannot post setup message to chat %s", chat_id)
+
+    if callback.message:
+        try:
+            await callback.message.edit_text(done, reply_markup=None)
+        except Exception:  # noqa: BLE001
+            await bot.send_message(callback.from_user.id, done)
+    await callback.answer()
 
 
 # ── /start ──────────────────────────────────────────────────────────────

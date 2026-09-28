@@ -11,6 +11,7 @@ export type Permission =
   | 'role.grant'
   | 'person.manage'
   | 'class.edit'
+  | 'timetable.edit'
 
 export type Role = 'parent' | 'treasurer' | 'chair' | 'auditor' | 'teacher' | 'admin'
 export type AssignableRole = 'treasurer' | 'chair' | 'auditor' | 'teacher'
@@ -106,6 +107,31 @@ export interface Settings {
   card_holder: string | null
   currency: string
   group_bound: boolean
+  chats: { role: ChatRole; title: string | null; bound_at: string }[]
+  teacher: { name: string } | null
+}
+
+export type ChatRole = 'parents' | 'committee' | 'teacher'
+
+export interface ScheduleDay {
+  id: number
+  date: string
+  lessons: string[]
+  bring: string[]
+  note: string | null
+  status: 'draft' | 'published' | 'replaced' | 'rejected' | 'withdrawn'
+  source: 'teacher_chat' | 'forward' | 'manual'
+  published_at: string | null
+  /** только у черновиков: исходный текст учительницы */
+  source_text?: string | null
+  recognizer?: string | null
+}
+
+export interface ScheduleOverview {
+  today: string
+  days: ScheduleDay[]
+  /** только у тех, кто может публиковать расписание */
+  drafts?: ScheduleDay[]
 }
 
 export interface PendingPayment {

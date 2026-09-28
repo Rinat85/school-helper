@@ -30,6 +30,17 @@ export const router = createRouter({
       props: (route) => ({ id: Number(route.params.id) }),
       meta: { back: true },
     },
+    {
+      path: '/schedule',
+      name: 'schedule',
+      component: () => import('./views/ScheduleView.vue'),
+    },
+    {
+      path: '/schedule/edit',
+      name: 'schedule-edit',
+      component: () => import('./views/ScheduleEditView.vue'),
+      meta: { back: true },
+    },
     { path: '/payments', name: 'payments', component: () => import('./views/PaymentsView.vue') },
     { path: '/people', name: 'people', component: () => import('./views/PeopleView.vue') },
     {

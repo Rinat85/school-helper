@@ -12,6 +12,8 @@ import type {
   MoneySummary,
   PendingPayment,
   Person,
+  ScheduleDay,
+  ScheduleOverview,
   Settings,
 } from './types'
 
@@ -97,6 +99,24 @@ export const api = {
   settings: () => request<Settings>('/settings'),
   saveSettings: (patch: Partial<Settings>) =>
     request<Settings>('/settings', { method: 'PUT', body: patch }),
+  unbindChat: (role: string) => request<Settings>(`/settings/chats/${role}`, { method: 'DELETE' }),
+  forgetTeacher: () => request<Settings>('/settings/teacher', { method: 'DELETE' }),
+
+  // Расписание
+  schedule: () => request<ScheduleOverview>('/schedule'),
+  scheduleDraft: (id: number) => request<ScheduleDay>(`/schedule/drafts/${id}`),
+  scheduleDay: (date: string) => request<ScheduleDay>(`/schedule/days/${date}`),
+  publishDay: (body: {
+    date: string
+    lessons: string[]
+    bring: string[]
+    note: string | null
+    draft_id: number | null
+  }) => request<ScheduleDay>('/schedule', { method: 'POST', body }),
+  rejectDraft: (id: number) =>
+    request<{ ok: true }>(`/schedule/drafts/${id}/reject`, { method: 'POST' }),
+  withdrawDay: (date: string) =>
+    request<{ ok: true }>(`/schedule/days/${date}`, { method: 'DELETE' }),
 
   // Сборы
   collections: () => request<Collection[]>('/collections'),

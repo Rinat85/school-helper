@@ -49,13 +49,20 @@ def enqueue(
 
 
 def enqueue_many(
-    people: list, kind: str, text: str, *, buttons: list[list[dict]] | None = None
+    people: list,
+    kind: str,
+    text: str,
+    *,
+    buttons: list[list[dict]] | None = None,
+    dedup_prefix: str | None = None,
 ) -> int:
+    """dedup_prefix: ключ повода — каждому человеку по поводу не больше одного раза."""
     sent = 0
     for person in people:
         if not person["dm_open"]:
             continue
-        if enqueue(int(person["id"]), kind, text, buttons=buttons):
+        key = f"{dedup_prefix}:{person['id']}" if dedup_prefix else None
+        if enqueue(int(person["id"]), kind, text, buttons=buttons, dedup_key=key):
             sent += 1
     return sent
 

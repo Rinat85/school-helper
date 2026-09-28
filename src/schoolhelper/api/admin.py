@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field
 from ..bot import publisher
 from ..core import security
 from ..services import people as people_svc
+from ..storage import chats, persons
 from ..storage import klass as klass_repo
-from ..storage import persons
 from .deps import Caller, caller
 
 router = APIRouter(prefix="/api")
@@ -118,7 +118,16 @@ def _settings(class_id: int) -> dict:
         "card_number": row["card_number"],
         "card_holder": row["card_holder"],
         "currency": row["currency"],
-        "group_bound": row["tg_chat_id"] is not None,
+        "group_bound": chats.chat_id(class_id, chats.PARENTS) is not None,
+        "chats": [
+            {"role": chat["role"], "title": chat["title"], "bound_at": chat["bound_at"]}
+            for chat in chats.of_class(class_id)
+        ],
+        "teacher": (
+            {"name": row["teacher_name"] or "учительница"}
+            if row["teacher_tg_user_id"] is not None
+            else None
+        ),
     }
 
 
@@ -152,4 +161,21 @@ async def put_settings(body: SettingsIn, user: Caller = Depends(caller)) -> dict
             (holder or "").strip() or None,
         )
 
+    return _settings(user.class_id)
+
+
+@router.delete("/settings/chats/{role}")
+async def unbind_chat(role: str, user: Caller = Depends(caller)) -> dict:
+    """Отвязать чат. Бот из него не выходит — его можно убрать из группы вручную."""
+    user.require("class.edit")
+    if role not in chats.ROLES or not chats.unbind(user.class_id, role):
+        raise HTTPException(404, "такой чат не привязан")
+    return _settings(user.class_id)
+
+
+@router.delete("/settings/teacher")
+async def forget_teacher(user: Caller = Depends(caller)) -> dict:
+    """Перестать читать сообщения учительницы автоматически (пересылка работает)."""
+    user.require("class.edit")
+    klass_repo.set_teacher(user.class_id, None, None)
     return _settings(user.class_id)

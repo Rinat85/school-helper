@@ -15,7 +15,7 @@ from aiogram.types import ChatMemberUpdated
 from .. import config
 from ..core import logger
 from ..core import roles as roles_mod
-from ..storage import klass as klass_repo
+from ..storage import chats
 
 log = logger.get(__name__)
 router = Router(name="access")
@@ -35,14 +35,14 @@ def may_bind_group(tg_user_id: int, roles: set[str]) -> bool:
 
 
 def may_stay(
-    chat_id: int, bound_chat_id: int | None, adder_tg_id: int, adder_roles: set[str]
+    chat_id: int, bound_chat_ids: set[int], adder_tg_id: int, adder_roles: set[str]
 ) -> bool:
-    """Оставаться в группе можно, если это группа класса или бота добавил председатель.
+    """Оставаться в группе можно, если это чат класса или бота добавил председатель.
 
-    Председателю можно добавить бота в новую группу — например, при переезде
-    класса в другой чат; привязку он сделает потом командой /setup.
+    Чатов у класса несколько (родительский, комитет, с учителем). Председателю
+    можно добавить бота в новую группу — привязку он сделает потом через /setup.
     """
-    if bound_chat_id is not None and chat_id == bound_chat_id:
+    if chat_id in bound_chat_ids:
         return True
     return may_bind_group(adder_tg_id, adder_roles)
 
@@ -54,8 +54,7 @@ async def added_to_group(
     if event.new_chat_member.status not in ("member", "administrator"):
         return  # бота удалили или ограничили — делать нечего
 
-    klass_row = klass_repo.get(class_id)
-    bound = klass_row["tg_chat_id"] if klass_row else None
+    bound = {int(row["tg_chat_id"]) for row in chats.of_class(class_id)}
     if may_stay(event.chat.id, bound, event.from_user.id, roles):
         return
 
