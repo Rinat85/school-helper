@@ -127,9 +127,24 @@ export interface ScheduleDay {
   recognizer?: string | null
 }
 
+export interface Club {
+  title: string
+  starts_at: string
+  ends_at: string
+}
+
+/** Постоянное расписание. weekday: 1 — понедельник … 7 — воскресенье. */
+export interface Timetable {
+  id: number
+  valid_from: string
+  /** только дни, где есть уроки или кружки */
+  days: { weekday: number; lessons: string[]; clubs: Club[] }[]
+}
+
 export interface ScheduleOverview {
   today: string
   days: ScheduleDay[]
+  timetable: Timetable | null
   /** только у тех, кто может публиковать расписание */
   drafts?: ScheduleDay[]
 }

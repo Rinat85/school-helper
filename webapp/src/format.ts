@@ -72,3 +72,11 @@ export function dayTitle(date: string, today = todayIso()): string {
   if (delta === -1) return `Вчера, ${label}`
   return label.charAt(0).toUpperCase() + label.slice(1)
 }
+
+/** Дни недели для постоянного расписания: индекс 0 — понедельник (weekday 1). */
+export const WEEKDAY_NAMES = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
+
+/** '2026-09-29' -> 2: день недели как на сервере, 1 — понедельник. */
+export function isoWeekday(date: string): number {
+  return new Date(`${date}T12:00:00`).getDay() || 7
+}

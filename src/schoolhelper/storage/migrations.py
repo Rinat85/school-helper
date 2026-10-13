@@ -109,9 +109,30 @@ def _m2_class_chats_and_day_schedule(conn: sqlite3.Connection) -> None:
     )
 
 
+def _m3_club_slot(conn: sqlite3.Connection) -> None:
+    """У класса появилось постоянное расписание уроков и кружков.
+
+    Уроки ложатся в lesson_slot из исходной схемы. Кружкам нужна своя таблица:
+    у них есть время, но нет номера урока, и в lesson_slot с его
+    UNIQUE (version_id, weekday, slot_no) они бы мешали нумерации.
+    Кружки — часть той же версии расписания: меняются вместе с ней.
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS club_slot ("
+        " id         INTEGER PRIMARY KEY,"
+        " version_id INTEGER NOT NULL REFERENCES timetable_version(id),"
+        " weekday    INTEGER NOT NULL CHECK (weekday BETWEEN 1 AND 7),"  # 1=Пн
+        " title      TEXT    NOT NULL,"
+        " starts_at  TEXT    NOT NULL,"  # '15:00'
+        " ends_at    TEXT    NOT NULL)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_club_slot ON club_slot(version_id, weekday)")
+
+
 MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "person: одобрение участия председателем", _m1_person_approval),
     (2, "чаты класса с ролями, учитель, расписание на день", _m2_class_chats_and_day_schedule),
+    (3, "кружки в постоянном расписании", _m3_club_slot),
 ]
 
 

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..core import util
 from ..services import schedule as schedule_svc
+from ..services import timetable as timetable_svc
 from .deps import Caller, caller
 
 router = APIRouter(prefix="/api/schedule")
@@ -18,10 +19,11 @@ EDIT = "timetable.edit"
 
 @router.get("")
 async def overview(user: Caller = Depends(caller)) -> dict:
-    """Вчера и две недели вперёд; редактору — ещё черновики на проверку."""
+    """Вчера и две недели вперёд, постоянное расписание; редактору — ещё черновики."""
     today = util.today()
     out: dict = {
         "today": str(today),
+        "timetable": timetable_svc.week(user.class_id, today),
         "days": [
             schedule_svc.as_dict(row)
             for row in schedule_svc.upcoming(user.class_id, today - dt.timedelta(days=1), 15)
@@ -73,6 +75,31 @@ async def publish(body: DayIn, user: Caller = Depends(caller)) -> dict:
         draft_id=body.draft_id,
     )
     return schedule_svc.as_dict(schedule_svc.get(day_id))
+
+
+class ClubIn(BaseModel):
+    weekday: int = Field(ge=1, le=7)
+    title: str = Field(max_length=80)
+    starts_at: str
+    ends_at: str
+
+
+class TimetableIn(BaseModel):
+    # ключ — день недели, 1=Пн
+    lessons: dict[int, list[str]] = Field(default_factory=dict, max_length=7)
+    clubs: list[ClubIn] = Field(default_factory=list, max_length=timetable_svc.MAX_CLUBS)
+
+
+@router.put("/timetable")
+async def save_timetable(body: TimetableIn, user: Caller = Depends(caller)) -> dict:
+    user.require(EDIT)
+    timetable_svc.save(
+        user.class_id,
+        user.id,
+        body.lessons,
+        [timetable_svc.Club(**club.model_dump()) for club in body.clubs],
+    )
+    return timetable_svc.week(user.class_id, util.today())
 
 
 @router.post("/drafts/{draft_id}/reject")

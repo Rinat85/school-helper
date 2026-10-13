@@ -15,6 +15,7 @@ import type {
   ScheduleDay,
   ScheduleOverview,
   Settings,
+  Timetable,
 } from './types'
 
 export class ApiError extends Error {
@@ -117,6 +118,10 @@ export const api = {
     request<{ ok: true }>(`/schedule/drafts/${id}/reject`, { method: 'POST' }),
   withdrawDay: (date: string) =>
     request<{ ok: true }>(`/schedule/days/${date}`, { method: 'DELETE' }),
+  saveTimetable: (body: {
+    lessons: Record<number, string[]>
+    clubs: { weekday: number; title: string; starts_at: string; ends_at: string }[]
+  }) => request<Timetable>('/schedule/timetable', { method: 'PUT', body }),
 
   // Сборы
   collections: () => request<Collection[]>('/collections'),

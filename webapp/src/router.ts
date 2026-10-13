@@ -41,6 +41,12 @@ export const router = createRouter({
       component: () => import('./views/ScheduleEditView.vue'),
       meta: { back: true },
     },
+    {
+      path: '/schedule/week',
+      name: 'timetable-edit',
+      component: () => import('./views/TimetableEditView.vue'),
+      meta: { back: true },
+    },
     { path: '/payments', name: 'payments', component: () => import('./views/PaymentsView.vue') },
     { path: '/people', name: 'people', component: () => import('./views/PeopleView.vue') },
     {

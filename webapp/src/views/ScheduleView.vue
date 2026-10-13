@@ -2,9 +2,9 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { api } from '../api'
-import { dayTitle } from '../format'
+import { WEEKDAY_NAMES, dayTitle, isoWeekday } from '../format'
 import { can } from '../session'
-import type { ScheduleOverview } from '../types'
+import type { Club, ScheduleDay, ScheduleOverview } from '../types'
 
 const data = ref<ScheduleOverview | null>(null)
 const error = ref('')
@@ -17,13 +17,51 @@ onMounted(async () => {
   }
 })
 
-/* Вчерашний день нужен только утром, пока не опубликован сегодняшний:
-   «что было задано» — дальше он просто мешает. */
-const days = computed(() => {
+interface Entry {
+  date: string
+  /** опубликованное со слов учительницы — главнее постоянного */
+  day: ScheduleDay | null
+  /** уроки по постоянному расписанию, если на день ничего не опубликовано */
+  lessons: string[]
+  clubs: Club[]
+}
+
+function weekDay(date: string) {
+  return data.value?.timetable?.days.find((d) => d.weekday === isoWeekday(date))
+}
+
+function addDays(date: string, n: number): string {
+  const day = new Date(`${date}T12:00:00`)
+  day.setDate(day.getDate() + n)
+  return day.toLocaleDateString('sv-SE')
+}
+
+/* Опубликованные дни плюс сегодня и ближайший учебный день по постоянному
+   расписанию. Вчерашний опубликованный нужен только утром, пока нет
+   сегодняшнего: «что было задано» — дальше он просто мешает. */
+const entries = computed<Entry[]>(() => {
   const all = data.value?.days ?? []
   const today = data.value?.today ?? ''
   const upcoming = all.filter((d) => d.date >= today)
-  return upcoming.length ? upcoming : all
+  const published = upcoming.length ? upcoming : all
+
+  const dates = new Set(published.map((d) => d.date))
+  if (data.value?.timetable) {
+    if (weekDay(today)) dates.add(today)
+    for (let n = 1; n <= 7; n++) {
+      const date = addDays(today, n)
+      if (weekDay(date)?.lessons.length) {
+        dates.add(date)
+        break
+      }
+    }
+  }
+
+  return [...dates].sort().map((date) => {
+    const day = published.find((d) => d.date === date) ?? null
+    const base = weekDay(date)
+    return { date, day, lessons: day ? day.lessons : (base?.lessons ?? []), clubs: base?.clubs ?? [] }
+  })
 })
 
 const editor = computed(() => can('timetable.edit'))
@@ -64,7 +102,7 @@ const editor = computed(() => can('timetable.edit'))
         <RouterLink to="/schedule/edit" class="btn btn-secondary">＋ Заполнить день</RouterLink>
       </div>
 
-      <div v-if="!days.length" class="section">
+      <div v-if="!entries.length" class="section">
         <div class="card">
           <div class="empty">
             Расписания пока нет. Оно появится, когда учительница напишет его в чате.
@@ -72,32 +110,71 @@ const editor = computed(() => can('timetable.edit'))
         </div>
       </div>
 
-      <div v-for="d in days" :key="d.id" class="section">
-        <div class="section-title">{{ dayTitle(d.date, data.today) }}</div>
+      <div v-for="e in entries" :key="e.date" class="section">
+        <div class="section-title">{{ dayTitle(e.date, data.today) }}</div>
         <div class="card">
-          <div v-for="(lesson, i) in d.lessons" :key="i" class="row">
+          <div v-for="(lesson, i) in e.lessons" :key="i" class="row">
             <span class="lesson-no">{{ i + 1 }}</span>
             <div class="row-main">{{ lesson }}</div>
           </div>
-          <div v-if="d.bring.length" class="row">
-            <span class="lesson-no">🎒</span>
-            <div class="row-main">
-              <div class="row-sub">С собой</div>
-              {{ d.bring.join(', ') }}
+          <template v-if="e.day">
+            <div v-if="e.day.bring.length" class="row">
+              <span class="lesson-no">🎒</span>
+              <div class="row-main">
+                <div class="row-sub">С собой</div>
+                {{ e.day.bring.join(', ') }}
+              </div>
             </div>
-          </div>
-          <div v-if="d.note" class="row">
-            <span class="lesson-no">📝</span>
-            <div class="row-main note">{{ d.note }}</div>
+            <div v-if="e.day.note" class="row">
+              <span class="lesson-no">📝</span>
+              <div class="row-main note">{{ e.day.note }}</div>
+            </div>
+          </template>
+          <div v-for="(club, i) in e.clubs" :key="`c${i}`" class="row">
+            <span class="lesson-no">⭐</span>
+            <div class="row-main">
+              <div class="row-sub">Кружок · {{ club.starts_at }}–{{ club.ends_at }}</div>
+              {{ club.title }}
+            </div>
           </div>
           <RouterLink
             v-if="editor"
-            :to="`/schedule/edit?date=${d.date}`"
+            :to="e.day ? `/schedule/edit?date=${e.date}` : `/schedule/edit?base=${e.date}`"
             class="row chevron edit-link"
           >
-            <div class="row-main">Изменить</div>
+            <div class="row-main">{{ e.day ? 'Изменить' : 'Уточнить на этот день' }}</div>
           </RouterLink>
         </div>
+        <p v-if="!e.day && e.lessons.length" class="section-note">
+          По постоянному расписанию — учительница может поменять.
+        </p>
+      </div>
+
+      <div v-if="data.timetable" class="section">
+        <div class="section-title">Обычная неделя</div>
+        <div class="card">
+          <div v-for="d in data.timetable.days" :key="d.weekday" class="row">
+            <div class="row-main">
+              <div class="row-title">{{ WEEKDAY_NAMES[d.weekday - 1] }}</div>
+              <div v-if="d.lessons.length" class="row-sub">
+                {{ d.lessons.map((l, i) => `${i + 1}. ${l}`).join('  ') }}
+              </div>
+              <div v-for="(club, i) in d.clubs" :key="i" class="row-sub">
+                ⭐ {{ club.title }}, {{ club.starts_at }}–{{ club.ends_at }}
+              </div>
+            </div>
+          </div>
+          <RouterLink v-if="editor" to="/schedule/week" class="row chevron edit-link">
+            <div class="row-main">Изменить неделю</div>
+          </RouterLink>
+        </div>
+      </div>
+      <div v-else-if="editor" class="section">
+        <RouterLink to="/schedule/week" class="btn btn-secondary">＋ Постоянное расписание</RouterLink>
+        <p class="section-note">
+          Уроки и кружки по дням недели. Родители увидят их на каждый день, пока учительница
+          не напишет иначе.
+        </p>
       </div>
     </template>
   </div>

@@ -36,7 +36,7 @@ def test_existing_people_stay_members(tmp_path):
     conn = _legacy_db(tmp_path)
     assert "approved_at" not in _columns(conn, "person")
 
-    assert migrations.apply(conn) == [1, 2]
+    assert migrations.apply(conn) == [1, 2, 3]
 
     row = conn.execute("SELECT approved_at, joined_at FROM person").fetchone()
     assert row["approved_at"] == row["joined_at"]

@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError, api } from '../api'
-import { dayTitle, todayIso } from '../format'
+import { dayTitle, isoWeekday, todayIso } from '../format'
 import { alertDialog, confirmDialog, haptic } from '../telegram'
 import { toast } from '../toast'
-import type { ScheduleDay } from '../types'
+import type { ScheduleDay, Timetable } from '../types'
 
 /*
  * Один экран на три случая:
  *   ?draft=12      — проверить черновик, распознанный из сообщения учительницы;
  *   ?date=2026-…   — изменить опубликованный день;
+ *   ?base=2026-…   — уточнить день, на который есть только постоянное расписание;
  *   без параметров — заполнить день вручную.
+ * В последних двух случаях уроки подставляются из постоянного расписания.
  */
 const route = useRoute()
 const router = useRouter()
@@ -27,6 +29,20 @@ const date = ref(nextSchoolDay())
 const lessons = ref('')
 const bring = ref('')
 const note = ref('')
+
+const timetable = ref<Timetable | null>(null)
+/** что подставили из постоянного расписания — пока не тронуто, меняется вместе с днём */
+const prefilled = ref('')
+
+function baseLessons(day: string): string {
+  const base = timetable.value?.days.find((d) => d.weekday === isoWeekday(day))
+  return (base?.lessons ?? []).join('\n')
+}
+
+watch(date, (day) => {
+  if (!timetable.value || lessons.value !== prefilled.value) return
+  lessons.value = prefilled.value = baseLessons(day)
+})
 
 function nextSchoolDay(): string {
   const day = new Date(`${todayIso()}T12:00:00`)
@@ -51,6 +67,10 @@ onMounted(async () => {
       date.value = route.query.date
       fill(await api.scheduleDay(route.query.date))
       published.value = true
+    } else {
+      if (typeof route.query.base === 'string') date.value = route.query.base
+      timetable.value = (await api.schedule()).timetable
+      lessons.value = prefilled.value = baseLessons(date.value)
     }
   } catch (e) {
     // 404 на дату — просто пустой день, остальное показываем
