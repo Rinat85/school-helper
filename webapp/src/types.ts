@@ -4,6 +4,7 @@ export type Permission =
   | 'money.view_by_person'
   | 'collection.create'
   | 'payment.confirm'
+  | 'expense.create'
   | 'expense.approve'
   | 'poll.create'
   | 'case.close'
@@ -28,6 +29,7 @@ export type ContributionStatus = 'confirmed' | 'partial' | 'claimed' | 'waived' 
 
 export interface Home {
   payments_to_confirm?: number
+  expenses_to_approve?: number
   pending_people?: number
   not_connected?: number
   my_open_contributions: {
@@ -159,4 +161,26 @@ export interface PendingPayment {
   collection_title: string
   claimed_at: string
   receipt_id: number | null
+}
+
+export interface Expense {
+  id: number
+  title: string
+  amount: number
+  spent_at: string
+  status: 'pending' | 'approved' | 'rejected'
+  note: string | null
+  receipt_id: number | null
+  created_by: number | null
+  created_by_name: string | null
+  approved_by_name: string | null
+  approved_at: string | null
+  created_at: string
+}
+
+export interface ExpensesOverview {
+  balance: number
+  /** родителям — только утверждённые; комитету — ещё ждущие и отклонённые */
+  items: Expense[]
+  has_auditor: boolean
 }

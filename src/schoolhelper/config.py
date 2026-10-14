@@ -61,8 +61,6 @@ CLASS_CODE = _str("CLASS_CODE", "1V")
 BOOTSTRAP_CHAIR_TG_ID = _int("BOOTSTRAP_CHAIR_TG_ID", 0)
 
 # ── Правила ─────────────────────────────────────────────────────────────
-# Расходы до этой суммы утверждаются автоматически (см. SPEC §3.3).
-EXPENSE_AUTO_APPROVE_UZS = _int("EXPENSE_AUTO_APPROVE_UZS", 100_000)
 
 # Локальная разработка Mini App в обычном браузере: заголовок `Authorization: dev`
 # входит под этим tg_user_id. Работает только для запросов с localhost.

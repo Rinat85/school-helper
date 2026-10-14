@@ -109,7 +109,8 @@ def test_expense_approval_is_not_available_to_its_author():
     """Правило двух рук: казначей создаёт расход, но утвердить его не может."""
     assert roles_mod.has({roles_mod.TREASURER}, "expense.create") is True
     assert roles_mod.has({roles_mod.TREASURER}, "expense.approve") is False
-    assert roles_mod.has({roles_mod.CHAIR}, "expense.approve") is True
+    assert roles_mod.has({roles_mod.CHAIR}, "expense.approve") is False
+    assert roles_mod.has({roles_mod.AUDITOR}, "expense.approve") is True
 
 
 # ── Повторные заявки ────────────────────────────────────────────────────

@@ -30,6 +30,7 @@ const nothingToDo = computed(
   () =>
     !home.value?.my_open_contributions.length &&
     !home.value?.payments_to_confirm &&
+    !home.value?.expenses_to_approve &&
     !home.value?.pending_people &&
     !home.value?.not_connected,
 )
@@ -82,6 +83,15 @@ const nothingToDo = computed(
           <span class="badge">{{ home.payments_to_confirm }}</span>
         </RouterLink>
 
+        <RouterLink v-if="home?.expenses_to_approve" to="/expenses" class="row chevron">
+          <span style="font-size: 22px">💸</span>
+          <div class="row-main">
+            <div class="row-title">Утвердить расходы</div>
+            <div class="row-sub">сверьте с чеком — после этого деньги уйдут из кассы</div>
+          </div>
+          <span class="badge">{{ home.expenses_to_approve }}</span>
+        </RouterLink>
+
         <RouterLink v-if="home?.pending_people" to="/people" class="row chevron">
           <span style="font-size: 22px">🙋</span>
           <div class="row-main">
@@ -106,11 +116,18 @@ const nothingToDo = computed(
     <template v-if="summary">
       <div class="section">
         <div class="section-title">Касса класса</div>
-        <div class="card card-pad">
-          <div class="big-number">{{ money(summary.balance, true) }}</div>
-          <div class="muted" style="font-size: 14px; margin-top: 4px">
-            поступило {{ money(summary.inflow) }} · потрачено {{ money(summary.outflow) }}
+        <div class="card">
+          <div class="card-pad">
+            <div class="big-number" :class="{ 'danger-text': summary.balance < 0 }">
+              {{ money(summary.balance, true) }}
+            </div>
+            <div class="muted" style="font-size: 14px; margin-top: 4px">
+              поступило {{ money(summary.inflow) }} · потрачено {{ money(summary.outflow) }}
+            </div>
           </div>
+          <RouterLink to="/expenses" class="row chevron">
+            <div class="row-main">На что потратили</div>
+          </RouterLink>
         </div>
       </div>
 

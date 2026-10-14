@@ -6,6 +6,8 @@ import { initData } from './telegram'
 import type {
   Collection,
   CollectionDetail,
+  Expense,
+  ExpensesOverview,
   Home,
   Invite,
   Me,
@@ -156,6 +158,25 @@ export const api = {
     request<{ status: string }>(`/payments/${id}/confirm`, { method: 'POST' }),
   rejectPayment: (id: number) =>
     request<{ status: string }>(`/payments/${id}/reject`, { method: 'POST', body: {} }),
+
+  // Расходы
+  expenses: () => request<ExpensesOverview>('/expenses'),
+  createExpense: (body: {
+    title: string
+    amount: number
+    spent_at: string
+    note: string | null
+    /** фото чека, base64 без префикса data: */
+    receipt: string | null
+  }) =>
+    request<Expense & { shortfall: number; auditors_notified: number }>('/expenses', {
+      method: 'POST',
+      body,
+    }),
+  approveExpense: (id: number) =>
+    request<Expense>(`/expenses/${id}/approve`, { method: 'POST' }),
+  rejectExpense: (id: number, reason: string | null) =>
+    request<Expense>(`/expenses/${id}/reject`, { method: 'POST', body: { reason } }),
 
   /** Чек через бэкенд: <img src> не умеет слать заголовок авторизации. */
   async fileUrl(id: number): Promise<string> {

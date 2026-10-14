@@ -8,7 +8,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from .. import config
-from . import access, money, onboarding, schedule
+from . import access, expenses, money, onboarding, schedule
 from .guard import TeacherChatGuard
 from .middleware import ContextMiddleware
 
@@ -36,4 +36,5 @@ def make_dispatcher() -> Dispatcher:
     # не должно приниматься за чек.
     dispatcher.include_router(schedule.router)
     dispatcher.include_router(money.router)
+    dispatcher.include_router(expenses.router)
     return dispatcher

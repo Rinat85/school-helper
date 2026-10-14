@@ -13,6 +13,7 @@ from ..bot import publisher
 from ..core import logger, util
 from ..core import roles as roles_mod
 from ..services import collections as coll_svc
+from ..services import expenses as expense_svc
 from ..services import payments as pay_svc
 from ..services import people as people_svc
 from ..storage import files, money
@@ -259,13 +260,15 @@ async def reject_payment(
 async def get_file(file_id: int, user: Caller = Depends(caller), tg: Bot = Depends(bot)):
     """Чек из Telegram. Браузер не может открыть file_id сам — отдаём через бота.
 
-    Чек видит тот, кто его загрузил, и те, кто сверяет деньги. Больше никто.
+    Чек видит тот, кто его загрузил, и те, кто сверяет деньги. Чек утверждённого
+    расхода — ещё и все, кому виден денежный раздел: это отчёт перед родителями.
     """
     row = files.get(file_id)
     if row is None or int(row["class_id"]) != user.class_id:
         raise HTTPException(404, "файл не найден")
     own = row["uploaded_by"] is not None and int(row["uploaded_by"]) == user.id
-    if not (own or user.can("payment.confirm") or user.can("money.view_by_person")):
+    public = roles_mod.sees_money(user.roles) and expense_svc.receipt_visible_to_all(file_id)
+    if not (own or public or user.can("payment.confirm") or user.can("money.view_by_person")):
         raise HTTPException(403, "нет доступа к файлу")
 
     try:

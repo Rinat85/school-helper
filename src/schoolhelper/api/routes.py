@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..core import roles as roles_mod
 from ..services import collections as coll_svc
+from ..services import expenses as expense_svc
 from ..services import payments as pay_svc
 from ..storage import klass as klass_repo
 from ..storage import money, persons
@@ -19,6 +20,7 @@ UI_PERMISSIONS = (
     "money.view_by_person",
     "collection.create",
     "payment.confirm",
+    "expense.create",
     "expense.approve",
     "poll.create",
     "case.close",
@@ -117,6 +119,8 @@ async def home(user: Caller = Depends(caller)) -> dict:
     todo: dict = {}
     if user.can("payment.confirm"):
         todo["payments_to_confirm"] = len(pay_svc.pending(user.class_id))
+    if user.can("expense.approve"):
+        todo["expenses_to_approve"] = expense_svc.pending_count(user.class_id, user.id)
     if user.can("person.manage"):
         todo["pending_people"] = len(persons.pending(user.class_id))
         todo["not_connected"] = sum(

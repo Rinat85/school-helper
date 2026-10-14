@@ -48,6 +48,18 @@ export const router = createRouter({
       meta: { back: true },
     },
     { path: '/payments', name: 'payments', component: () => import('./views/PaymentsView.vue') },
+    {
+      path: '/expenses',
+      name: 'expenses',
+      component: () => import('./views/ExpensesView.vue'),
+      meta: { back: true },
+    },
+    {
+      path: '/expenses/new',
+      name: 'expense-new',
+      component: () => import('./views/ExpenseNewView.vue'),
+      meta: { back: true },
+    },
     { path: '/people', name: 'people', component: () => import('./views/PeopleView.vue') },
     {
       path: '/people/:id',

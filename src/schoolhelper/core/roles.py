@@ -38,7 +38,7 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "collection.create":    frozenset({TREASURER, CHAIR}),
     "payment.confirm":      frozenset({TREASURER}),
     "expense.create":       frozenset({TREASURER, CHAIR}),
-    "expense.approve":      frozenset({CHAIR, AUDITOR}),
+    "expense.approve":      frozenset({AUDITOR}),  # любой расход, без порога (SPEC §3.3)
     # решения и события
     "poll.create":          frozenset({TREASURER, CHAIR}),
     "case.create":          frozenset({TREASURER, CHAIR}),
