@@ -72,6 +72,13 @@ DEV_AUTH_TG_ID = _int("DEV_AUTH_TG_ID", 0)
 # Срок годности initData Mini App, секунды.
 INITDATA_TTL_SEC = _int("INITDATA_TTL_SEC", 86_400)
 
+# Ежедневная зашифрованная копия базы в Telegram (bot/backup.py).
+# Ключ — 64 hex-символа: python -c "import secrets;print(secrets.token_hex(32))".
+# Пусто — копия не отправляется. Ключ храните ВНЕ сервера: без него копия бесполезна.
+BACKUP_KEY = _str("BACKUP_KEY")
+# Кому слать копию; по умолчанию — BOOTSTRAP_CHAIR_TG_ID.
+BACKUP_TG_ID = _int("BACKUP_TG_ID", 0)
+
 # Антиспам напоминаний о взносе: за сколько дней до дедлайна + в день дедлайна.
 REMIND_DAYS_BEFORE = _int("REMIND_DAYS_BEFORE", 3)
 

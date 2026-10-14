@@ -8,6 +8,8 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "python-dotenv>=1.0",
+    # шифрование ежедневной копии базы (bot/backup.py)
+    "cryptography>=42",
     # На Windows у zoneinfo нет системной базы часовых поясов.
     "tzdata>=2024.1; sys_platform == 'win32'",
 ]

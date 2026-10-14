@@ -32,6 +32,7 @@ RUN pip install --no-cache-dir \
         "fastapi>=0.115" \
         "uvicorn[standard]>=0.30" \
         "python-dotenv>=1.0" \
+        "cryptography>=42" \
         "tzdata>=2024.1"
 
 COPY src ./src

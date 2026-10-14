@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 
 from . import config
-from .bot import menu, notify, reminders
+from .bot import backup, menu, notify, reminders
 from .bot.factory import make_bot, make_dispatcher
 from .core import logger
 from .storage import db
@@ -43,6 +43,7 @@ async def main() -> None:
     background = [
         asyncio.create_task(notify.pump_forever(bot)),
         asyncio.create_task(reminders.run_forever()),
+        asyncio.create_task(backup.run_forever(bot)),
     ]
     try:
         await dispatcher.start_polling(bot)

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 from contextlib import asynccontextmanager
 
 from aiogram.types import MenuButtonWebApp, Update, WebAppInfo
@@ -19,7 +20,7 @@ from .api.admin import router as admin_router
 from .api.money_admin import router as money_admin_router
 from .api.routes import router as api_router
 from .api.schedule import router as schedule_router
-from .bot import menu, notify, reminders
+from .bot import backup, menu, notify, reminders
 from .bot.factory import make_bot, make_dispatcher
 from .core import logger, util
 from .services.payments import PaymentError
@@ -46,6 +47,7 @@ async def lifespan(app: FastAPI):
     tasks: list[asyncio.Task] = [
         asyncio.create_task(notify.pump_forever(bot)),
         asyncio.create_task(reminders.run_forever()),
+        asyncio.create_task(backup.run_forever(bot)),
     ]
 
     # HTTP-сервер поднимается в обоих режимах: деплою нужен /health, даже когда
@@ -141,7 +143,7 @@ async def business_rule_error(request: Request, exc: Exception) -> JSONResponse:
 
 @app.post("/tg/webhook/{secret}")
 async def telegram_webhook(secret: str, request: Request) -> JSONResponse:
-    if not config.WEBHOOK_SECRET or secret != config.WEBHOOK_SECRET:
+    if not config.WEBHOOK_SECRET or not hmac.compare_digest(secret, config.WEBHOOK_SECRET):
         raise HTTPException(404)
     update = Update.model_validate(await request.json(), context={"bot": bot})
     await dispatcher.feed_update(bot, update)
